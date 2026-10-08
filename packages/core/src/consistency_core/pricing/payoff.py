@@ -13,10 +13,11 @@ assumed from the template.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from decimal import Decimal
 
 from consistency_core.models.common import FrozenModel, Side
-from consistency_core.models.relationship import Relationship
+from consistency_core.models.relationship import Relationship, ScenarioSpec
 from consistency_core.money import ZERO, Dec
 from consistency_core.pricing.portfolio import Portfolio
 from consistency_core.relationships.scenarios import ScenarioSpace
@@ -34,6 +35,8 @@ class PayoffAnalysis(FrozenModel):
     method: str
     """``enumerated`` (every admissible state listed) or ``constraint`` (exact linear minimum)."""
     admissible_state_count: int
+    scenario_sets: int = 1
+    """>1 when the derived set was added because the relationship's own set failed integrity."""
     constant: Dec
     weights: dict[str, Dec]
     min_payoff_per_unit: Dec
@@ -64,27 +67,37 @@ def payoff_coefficients(
     return constant, weights
 
 
-def analyse_payoff(relationship: Relationship, portfolio: Portfolio) -> PayoffAnalysis:
+def analyse_payoff(
+    relationship: Relationship,
+    portfolio: Portfolio,
+    specs: Sequence[ScenarioSpec] | None = None,
+) -> PayoffAnalysis:
+    """Exact worst case over the union of ``specs`` (default: the relationship's own set)."""
     members = relationship.members
     constant, weights = payoff_coefficients(portfolio, members)
-    space = ScenarioSpace(relationship.scenario_spec, len(members))
-    lo, worst = space.min_linear(constant, weights)
-    hi, _ = space.max_linear(constant, weights)
-    count = space.count()
+    spaces = [ScenarioSpace(sp, len(members)) for sp in (specs or [relationship.scenario_spec])]
+    lows = [sp.min_linear(constant, weights) for sp in spaces]
+    lo, worst = min(lows, key=lambda t: t[0])
+    hi = max(sp.max_linear(constant, weights)[0] for sp in spaces)
+    union: list[tuple[int, ...]] | None = None
+    if all(sp.enumerable for sp in spaces):
+        union = list(dict.fromkeys(s for sp in spaces for s in sp.iter_states()))
+    count = len(union) if union is not None else sum(sp.count() for sp in spaces)
     states: tuple[StatePayoff, ...] | None = None
-    if count <= LISTED_STATES_LIMIT:
+    if union is not None and len(union) <= LISTED_STATES_LIMIT:
         states = tuple(
             StatePayoff(
                 state=dict(zip(members, s, strict=True)),
                 payoff_per_unit=constant
                 + sum((w for w, b in zip(weights, s, strict=True) if b), ZERO),
             )
-            for s in space.iter_states()
+            for s in union
         )
         assert min(sp.payoff_per_unit for sp in states) == lo
     return PayoffAnalysis(
         method="enumerated" if states is not None else "constraint",
         admissible_state_count=count,
+        scenario_sets=len(spaces),
         constant=constant,
         weights=dict(zip(members, weights, strict=True)),
         min_payoff_per_unit=lo,

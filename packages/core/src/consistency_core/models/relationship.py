@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Literal
 
-from pydantic import AwareDatetime, model_validator
+from pydantic import AwareDatetime, Field, model_validator
 
 from consistency_core.models.common import FrozenModel
 
@@ -82,6 +83,36 @@ class ScenarioSpec(FrozenModel):
         return self
 
 
+class ScenarioProvenance(FrozenModel):
+    """Where a relationship's admissible scenario set came from.
+
+    ``derived``: the set implied by the relationship type (and *proven* exhaustiveness).
+    ``overridden``: a reviewer supplied a different set; the diff against the derived set is
+    recorded. Removing derived-admissible states asserts a stronger relationship and is only
+    acceptable when ``justified_by`` names separately verified relationships that exclude them.
+    """
+
+    source: Literal["derived", "overridden"] = "derived"
+    derived_exhaustive: bool | None = None
+    """Exhaustiveness the derived set was computed with; None = ``Relationship.exhaustive``."""
+    derived_spec: ScenarioSpec | None = None
+    removed_states: tuple[tuple[int, ...], ...] = ()
+    added_states: tuple[tuple[int, ...], ...] = ()
+    removed_count: int = 0
+    added_count: int = 0
+    comparison: Literal["exact", "uncheckable"] = "exact"
+    """``uncheckable``: the two sets could not be compared exactly (too large, mixed kinds)."""
+    justified_by: tuple[str, ...] = ()
+    reviewer: str | None = None
+    review_id: str | None = None
+    justification: str | None = None
+    evidence_refs: tuple[str, ...] = ()
+
+    @property
+    def removes_states(self) -> bool:
+        return bool(self.removed_states) or self.removed_count > 0
+
+
 class ReviewRecord(FrozenModel):
     reviewer: str
     decision: VerificationStatus
@@ -98,6 +129,7 @@ class Relationship(FrozenModel):
     constraints: tuple[str, ...]
     """Human-readable formal constraints, e.g. ``P(A) <= P(B)``."""
     scenario_spec: ScenarioSpec
+    scenario_provenance: ScenarioProvenance = Field(default_factory=ScenarioProvenance)
     exhaustive: bool = False
     """True only when exhaustiveness is independently proven (partitions, covered intervals)."""
     verification_status: VerificationStatus
@@ -131,6 +163,15 @@ class Relationship(FrozenModel):
             e.outcome is not EvidenceOutcome.PASS for e in self.evidence
         ):
             raise ValueError("a VERIFIED relationship cannot carry failing/unknown evidence")
+        prov = self.scenario_provenance
+        if self.verification_status is VerificationStatus.VERIFIED:
+            if prov.removes_states and not prov.justified_by:
+                raise ValueError(
+                    "a VERIFIED relationship's scenario override removes admissible states "
+                    "without a separately verified justification"
+                )
+            if prov.comparison == "uncheckable":
+                raise ValueError("a VERIFIED relationship needs an exactly checked scenario set")
         if self.updated_at < self.created_at:
             raise ValueError("updated_at precedes created_at")
         return self

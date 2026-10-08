@@ -70,6 +70,7 @@ from consistency_core.pricing.payoff import (
     analyse_payoff,
 )
 from consistency_core.pricing.portfolio import Portfolio
+from consistency_core.relationships.scenario_integrity import integrity_reasons, pricing_specs
 from consistency_core.relationships.scenarios import ScenarioSpaceError
 from consistency_core.serialization import canonical_json, sha256_of
 
@@ -85,6 +86,8 @@ class Reason(StrEnum):
     DUPLICATE_LEG = "DUPLICATE_LEG"
     UNSUPPORTED_LEG_RATIO = "UNSUPPORTED_LEG_RATIO"
     SCENARIOS_NOT_MODELABLE = "SCENARIOS_NOT_MODELABLE"
+    SCENARIO_OVERRIDE_REMOVES_ADMISSIBLE_STATES = "SCENARIO_OVERRIDE_REMOVES_ADMISSIBLE_STATES"
+    SCENARIO_SET_UNCHECKABLE = "SCENARIO_SET_UNCHECKABLE"
     BOOK_MISSING = "BOOK_MISSING"
     BOOK_UNSYNCHRONIZED = "BOOK_UNSYNCHRONIZED"
     BOOK_TOO_OLD = "BOOK_TOO_OLD"
@@ -325,7 +328,8 @@ class _Evaluator:
             if leg.market_id not in self.markets:
                 r.append(Reason.MARKET_UNKNOWN)
         try:
-            self.payoff = analyse_payoff(self.rel, self.pf)
+            r.extend(integrity_reasons(self.rel))
+            self.payoff = analyse_payoff(self.rel, self.pf, pricing_specs(self.rel))
             self.min_payoff = self.payoff.min_payoff_per_unit
         except PortfolioNotInRelationshipError:
             r.append(Reason.PORTFOLIO_NOT_IN_RELATIONSHIP)
@@ -722,6 +726,7 @@ def evaluate(
             rules_hashes=rel.rules_hashes,
             exhaustive=rel.exhaustive,
             scenario_spec=rel.scenario_spec,
+            scenario_provenance=rel.scenario_provenance,
             constraints=rel.constraints,
             invalidation_reason=rel.invalidation_reason,
         ),

@@ -15,7 +15,12 @@ from consistency_core.fees.model import Role
 from consistency_core.fees.rounding import OrderFees
 from consistency_core.models.common import FrozenModel, MarketStatus, Side, SyncStatus
 from consistency_core.models.detection import Classification
-from consistency_core.models.relationship import RelationshipType, ScenarioSpec, VerificationStatus
+from consistency_core.models.relationship import (
+    RelationshipType,
+    ScenarioProvenance,
+    ScenarioSpec,
+    VerificationStatus,
+)
 from consistency_core.money import Dec, dec
 from consistency_core.pricing.depth import DepthWalkResult
 from consistency_core.pricing.payoff import PayoffAnalysis
@@ -61,6 +66,7 @@ class RelationshipRef(FrozenModel):
     rules_hashes: dict[str, str]
     exhaustive: bool
     scenario_spec: ScenarioSpec
+    scenario_provenance: ScenarioProvenance
     constraints: tuple[str, ...]
     invalidation_reason: str | None
 

@@ -8,6 +8,12 @@ Safety rules:
   wording) but can never override FAIL evidence (a proven difference or counterexample).
 * :func:`revalidate` must run whenever reference data refreshes: any rules change on a member
   demotes the relationship so it can no longer produce verified classifications.
+* A supplied ``scenario_spec`` (or an ``exhaustive`` claim) is compared with the set derived
+  from the relationship type (see ``scenario_integrity``). Equal sets stay ``derived``. Any
+  difference is an override: it needs a justification, evidence references and declared
+  removed/added states matching the computed diff. A superset is accepted (conservative); a
+  removal keeps the relationship at CANDIDATE_REVIEW unless separately verified relationships
+  with derived sets over the same members exclude every removed state.
 """
 
 from __future__ import annotations
@@ -28,8 +34,23 @@ from consistency_core.models.relationship import (
     Relationship,
     RelationshipType,
     ReviewRecord,
+    ScenarioProvenance,
     ScenarioSpec,
     VerificationStatus,
+)
+from consistency_core.relationships.scenario_integrity import (
+    DIFF_MISMATCH,
+    JUSTIFIED,
+    METADATA_MISSING,
+    REMOVES_ADMISSIBLE_STATES,
+    SUPERSET,
+    UNCHECKABLE,
+    derived_spec,
+    diff_specs,
+    excludes,
+    proven_exhaustive,
+    remap_spec,
+    remap_state,
 )
 from consistency_core.relationships.verification import (
     CONTEXT_FIELDS,
@@ -54,7 +75,15 @@ class ManualReview(FrozenModel):
     reasoning: str
     rules_hashes: dict[str, str]
     scenario_spec: ScenarioSpec | None = None
+    """States aligned with ``members`` as listed in this review."""
     exhaustive: bool = False
+    scenario_justification: str | None = None
+    """Required whenever the supplied set differs from the derived one."""
+    scenario_evidence: tuple[str, ...] = ()
+    """References (documents, tickets, rule clauses) backing a scenario override."""
+    declared_removed_states: tuple[tuple[int, ...], ...] | None = None
+    """Derived-admissible states the override removes; must equal the computed diff."""
+    declared_added_states: tuple[tuple[int, ...], ...] | None = None
 
 
 class ReviewFile(FrozenModel):
@@ -88,6 +117,7 @@ def apply_reviews(
     by_id = {r.relationship_id: r for r in relationships}
     markets = catalog.markets_by_id()
     notes: list[str] = []
+    pending: dict[str, ManualReview] = {}
     for review in reviews.reviews:
         missing = [m for m in review.members if m not in markets]
         if missing:
@@ -115,8 +145,6 @@ def apply_reviews(
                 reasoning=review.reasoning,
                 as_of=as_of,
                 discovered_by=REVIEW_DISCOVERED_BY,
-                exhaustive=review.exhaustive,
-                scenario=review.scenario_spec,
             )
         current = {m.market_id: m.rules_hash for m in members}
         stale = sorted(m for m in current if review.rules_hashes.get(m) != current[m])
@@ -137,6 +165,9 @@ def apply_reviews(
             )
             by_id[updated.relationship_id] = updated
             continue
+        scenario, exhaustive, provenance, scenario_checks, needs_justifier = _scenario_override(
+            existing, review
+        )
         failing = [e for e in existing.evidence if e.outcome is EvidenceOutcome.FAIL]
         evidence: tuple[EvidenceCheck, ...] = existing.evidence
         status = review.decision
@@ -165,8 +196,19 @@ def apply_reviews(
                         f"{review.reviewer} at {review.reviewed_at.isoformat()}",
                     ),
                 )
-        scenario = review.scenario_spec or existing.scenario_spec
-        exhaustive = review.exhaustive or existing.exhaustive
+        evidence = (*evidence, *scenario_checks)
+        if status is VerificationStatus.VERIFIED and any(
+            e.outcome is not EvidenceOutcome.PASS for e in evidence
+        ):
+            status = VerificationStatus.CANDIDATE_REVIEW
+            open_checks = [
+                e.check for e in scenario_checks if e.outcome is not EvidenceOutcome.PASS
+            ]
+            notes.append(
+                f"{review.review_id}: approval held at candidate_review ({', '.join(open_checks)})"
+            )
+        if needs_justifier:
+            pending[existing.relationship_id] = review
         updated = existing.model_copy(
             update={
                 "verification_status": status,
@@ -174,6 +216,7 @@ def apply_reviews(
                 "reviewer": review.reviewer,
                 "reviews": (*existing.reviews, record),
                 "scenario_spec": scenario,
+                "scenario_provenance": provenance,
                 "exhaustive": exhaustive,
                 "fingerprint": fingerprint(
                     existing.relationship_type,
@@ -187,7 +230,155 @@ def apply_reviews(
         )
         by_id[updated.relationship_id] = Relationship.model_validate(updated.model_dump())
         notes.append(f"{review.review_id}: applied ({status.value})")
+    _justify_overrides(by_id, pending, notes)
     return [by_id[k] for k in sorted(by_id)], notes
+
+
+def _scenario_override(
+    existing: Relationship, review: ManualReview
+) -> tuple[ScenarioSpec, bool, ScenarioProvenance, list[EvidenceCheck], bool]:
+    """Validate a review's scenario set (and exhaustiveness claim) against the derived set.
+
+    Returns ``(spec, exhaustive, provenance, checks, needs_justifier)``. ``needs_justifier`` is
+    True when the override is well-formed but removes derived-admissible states, so it may only
+    be verified by a separately verified relationship (resolved in :func:`_justify_overrides`).
+    """
+    rtype, members = existing.relationship_type, existing.members
+    n = len(members)
+    proven = proven_exhaustive(existing)
+    claimed = review.exhaustive or existing.exhaustive
+    derived = derived_spec(rtype, n, exhaustive=proven)
+    supplied = (
+        remap_spec(review.scenario_spec, review.members, members)
+        if review.scenario_spec is not None
+        else derived_spec(rtype, n, exhaustive=claimed)
+    )
+    diff = diff_specs(supplied, derived, n)
+    if diff.identical:
+        return supplied, proven, ScenarioProvenance(derived_exhaustive=proven), [], False
+
+    def declared(states: tuple[tuple[int, ...], ...] | None) -> set[tuple[int, ...]]:
+        return {remap_state(st, review.members, members) for st in states or ()}
+
+    checks: list[EvidenceCheck] = []
+    if not diff.exact:
+        checks.append(
+            check(UNCHECKABLE, EvidenceOutcome.UNKNOWN, "supplied and derived sets not comparable")
+        )
+    if not (review.scenario_justification and review.scenario_evidence):
+        checks.append(
+            check(
+                METADATA_MISSING,
+                EvidenceOutcome.UNKNOWN,
+                "a scenario override needs a justification and evidence references",
+            )
+        )
+    if diff.exact and (
+        declared(review.declared_removed_states) != set(diff.removed)
+        or declared(review.declared_added_states) != set(diff.added)
+    ):
+        checks.append(
+            check(
+                DIFF_MISMATCH,
+                EvidenceOutcome.UNKNOWN,
+                f"declared removed/added states do not match computed removed "
+                f"{[list(x) for x in diff.removed]} added {[list(x) for x in diff.added]}",
+            )
+        )
+    well_formed = not checks
+    if diff.removed_count:
+        checks.append(
+            check(
+                REMOVES_ADMISSIBLE_STATES,
+                EvidenceOutcome.UNKNOWN,
+                f"override removes {diff.removed_count} derived-admissible state(s) "
+                f"{[list(x) for x in diff.removed]}; needs a separately verified relationship "
+                "that excludes them",
+            )
+        )
+    elif diff.added_count and well_formed:
+        checks.append(
+            check(
+                SUPERSET,
+                EvidenceOutcome.PASS,
+                f"conservative superset: adds {[list(x) for x in diff.added]}",
+            )
+        )
+    provenance = ScenarioProvenance(
+        source="overridden",
+        derived_exhaustive=proven,
+        derived_spec=derived,
+        removed_states=diff.removed,
+        added_states=diff.added,
+        removed_count=diff.removed_count,
+        added_count=diff.added_count,
+        comparison="exact" if diff.exact else "uncheckable",
+        reviewer=review.reviewer,
+        review_id=review.review_id,
+        justification=review.scenario_justification,
+        evidence_refs=review.scenario_evidence,
+    )
+    return supplied, claimed, provenance, checks, well_formed and diff.removed_count > 0
+
+
+def _justify_overrides(
+    by_id: dict[str, Relationship], pending: dict[str, ManualReview], notes: list[str]
+) -> None:
+    """Accept a state-removing override only if separately VERIFIED relationships over the same
+    members, whose own scenario sets are *derived* (no chains of overrides), exclude every
+    removed state."""
+    for rel_id, review in sorted(pending.items()):
+        rel = by_id[rel_id]
+        prov = rel.scenario_provenance
+        justifiers = sorted(
+            (
+                j
+                for j in by_id.values()
+                if j.relationship_id != rel_id
+                and j.is_verified
+                and j.scenario_provenance.source == "derived"
+                and set(j.members) == set(rel.members)
+            ),
+            key=lambda j: j.relationship_id,
+        )
+        used: set[str] = set()
+        covered = bool(prov.removed_states) and prov.removed_count == len(prov.removed_states)
+        for state in prov.removed_states:
+            hit = [j for j in justifiers if excludes(j, state, rel.members)]
+            if not hit:
+                covered = False
+                break
+            used.add(hit[0].relationship_id)
+        if not covered:
+            notes.append(f"{review.review_id}: override not justified by a verified relationship")
+            continue
+        evidence = tuple(
+            check(
+                JUSTIFIED,
+                EvidenceOutcome.PASS,
+                f"removed states excluded by verified {sorted(used)}",
+            )
+            if e.check == REMOVES_ADMISSIBLE_STATES
+            else e
+            for e in rel.evidence
+        )
+        status = rel.verification_status
+        if review.decision is VerificationStatus.VERIFIED and all(
+            e.outcome is EvidenceOutcome.PASS for e in evidence
+        ):
+            status = VerificationStatus.VERIFIED
+        by_id[rel_id] = Relationship.model_validate(
+            rel.model_copy(
+                update={
+                    "evidence": evidence,
+                    "verification_status": status,
+                    "scenario_provenance": prov.model_copy(
+                        update={"justified_by": tuple(sorted(used))}
+                    ),
+                }
+            ).model_dump()
+        )
+        notes.append(f"{review.review_id}: override justified by {sorted(used)}")
 
 
 def revalidate(
@@ -209,4 +400,11 @@ def revalidate(
         elif changed:
             rel = rel.invalidate(f"rules changed for {changed}", as_of)
         out.append(rel)
+    verified = {r.relationship_id for r in out if r.is_verified}
+    for i, rel in enumerate(out):
+        lost = [j for j in rel.scenario_provenance.justified_by if j not in verified]
+        if rel.is_verified and lost:
+            out[i] = rel.invalidate(
+                f"scenario override justification no longer verified: {lost}", as_of
+            )
     return out

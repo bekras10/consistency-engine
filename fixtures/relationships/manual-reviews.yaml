@@ -5,6 +5,9 @@
 #  * rules_hashes pin the exact market rules that were reviewed. If any hash no longer matches
 #    the catalog, the review is stale and the relationship drops to candidate_review.
 #  * A reviewer can resolve UNKNOWN evidence but can never override FAIL evidence.
+#  * scenario_spec must equal the set derived from the relationship type, or be an override with
+#    scenario_justification, scenario_evidence and declared_removed/added_states. Removing
+#    derived-admissible states needs a separately verified relationship that excludes them.
 #  * All markets below are SYNTHETIC (tickers start with SYN); reviewer is a fixture identity.
 schema_version: 1
 reviews:

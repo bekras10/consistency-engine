@@ -131,9 +131,7 @@ def default_scenarios(rtype: RelationshipType, n: int, *, exhaustive: bool) -> S
             return ScenarioSpec(kind=ScenarioKind.EXPLICIT, explicit_states=((0, 0), (1, 1)))
         case RelationshipType.EXHAUSTIVE_PARTITION:
             return ScenarioSpec(kind=ScenarioKind.CARDINALITY, min_yes=1, max_yes=1)
-        case RelationshipType.MUTUALLY_EXCLUSIVE:
-            return ScenarioSpec(kind=ScenarioKind.CARDINALITY, min_yes=0, max_yes=1)
-        case RelationshipType.DISJOINT_INTERVALS:
+        case RelationshipType.MUTUALLY_EXCLUSIVE | RelationshipType.DISJOINT_INTERVALS:
             lo = 1 if exhaustive else 0
             return ScenarioSpec(kind=ScenarioKind.CARDINALITY, min_yes=lo, max_yes=1)
 
