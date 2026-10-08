@@ -6,8 +6,9 @@ Classification precedence (first failing step decides; exactly one primary statu
                            not drawn from the members, unsupported leg ratio, or scenarios not
                            modelable
  2. UNSYNCHRONIZED_DATA    any leg book missing or not SYNCHRONIZED
- 3. STALE_DATA             max book age > max_book_age_ms, or cross-market skew >
-                           max_cross_market_skew_ms
+ 3. STALE_DATA             any book observed after ``now`` (NEGATIVE_BOOK_AGE; the age is
+                           then left unset, never negative), max book age > max_book_age_ms,
+                           or cross-market skew > max_cross_market_skew_ms
  4. INSUFFICIENT_LIQUIDITY a leg market is not OPEN, or a leg has no asks
  5. NO_OPPORTUNITY         top-of-book worst-case edge (min payoff - premium) <= 0
  6. INSUFFICIENT_LIQUIDITY max supported basket < required size (DEPTH_BELOW_MINIMUM)
@@ -91,6 +92,7 @@ class Reason(StrEnum):
     BOOK_MISSING = "BOOK_MISSING"
     BOOK_UNSYNCHRONIZED = "BOOK_UNSYNCHRONIZED"
     BOOK_TOO_OLD = "BOOK_TOO_OLD"
+    NEGATIVE_BOOK_AGE = "NEGATIVE_BOOK_AGE"
     CROSS_MARKET_SKEW = "CROSS_MARKET_SKEW"
     MARKET_NOT_OPEN = "MARKET_NOT_OPEN"
     NO_ASKS = "NO_ASKS"
@@ -359,9 +361,13 @@ class _Evaluator:
 
     def _s3_fresh(self) -> list[str]:
         observed = [self._book(leg.market_id).observed_ts_ms for leg in self.pf.legs]
-        self.max_age = self.now_ms - min(observed)
         self.skew = max(observed) - min(observed)
         r: list[str] = []
+        if max(observed) > self.now_ms:
+            # a book claims validity after "now": its age is undefined, never reported negative
+            self._note(f"book observed {max(observed) - self.now_ms} ms after evaluation time")
+            return [Reason.NEGATIVE_BOOK_AGE]
+        self.max_age = self.now_ms - min(observed)
         if self.max_age > self.cfg.max_book_age_ms:
             r.append(Reason.BOOK_TOO_OLD)
         if self.skew > self.cfg.max_cross_market_skew_ms:

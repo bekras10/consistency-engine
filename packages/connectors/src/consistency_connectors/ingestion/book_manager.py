@@ -3,15 +3,23 @@
 Rules implemented here:
 
 * A market is SYNCHRONIZED only after a validated snapshot.
-* Sequence numbers are tracked **per subscription (sid)**. A gap on a sid desynchronizes every
-  market carried by that sid, because we cannot know which market's update was lost.
+* Sequence numbers are tracked **per subscription**, identified by ``(connection_id, sid)``
+  (sids are only unique within a connection). A gap desynchronizes every market carried by that
+  subscription, because we cannot know which market's update was lost.
 * ``seq <= last`` is a duplicate/late message and is dropped without effect.
 * Any malformed message, negative resulting quantity, off-grid price, crossed book, or lost
   connection marks the affected books UNSYNCHRONIZED and queues a recovery request. While
   UNSYNCHRONIZED, deltas are ignored; only a fresh snapshot restores trust.
-* Freshness: each connection's ``confirmed_through`` is the newest exchange emission time
-  received on it. Messages on one connection arrive in emission order, so every trusted book on
-  that connection is known complete as of that instant (quiet markets stay fresh via heartbeats).
+* Freshness: each connection's ``confirmed_through`` is the newest emission time of an
+  *accepted* message on it: an applied snapshot or delta, or a heartbeat. Proof: messages on one
+  connection arrive in emission order, and every earlier message on it was either applied or
+  desynchronized its book, so every book still SYNCHRONIZED on that connection is complete as of
+  that instant (quiet markets stay fresh via heartbeats). Malformed, duplicate, gapped, rejected,
+  stale-subscription and ignored messages never advance it: their timestamps are untrusted.
+* Future-dated timestamps: a message whose emission time or exchange timestamp exceeds its local
+  receipt time by more than ``max_future_ms`` is quarantined: it never advances
+  ``confirmed_through``; a snapshot/delta is not applied (its sequence number is still consumed)
+  and its market is desynchronized with ``FUTURE_TIMESTAMP``.
 
 Timing telemetry (``perf_counter_ns``) is recorded on each update but excluded from
 :meth:`state_digest`, so replays compare equal while wall-clock latency may differ.
@@ -64,6 +72,10 @@ class DesyncReason:
     RECONNECT_EXHAUSTED = "RECONNECT_EXHAUSTED"
     SOURCE_ERROR = "SOURCE_ERROR"
     RUNNER_STOPPED = "RUNNER_STOPPED"
+    FUTURE_TIMESTAMP = "FUTURE_TIMESTAMP"
+
+
+DEFAULT_MAX_FUTURE_MS = 1_000
 
 
 @dataclass(frozen=True)
@@ -151,6 +163,7 @@ class ManagerStats:
     ignored_stale_subscription: int = 0
     desync_events: int = 0
     connection_losses: int = 0
+    future_timestamps: int = 0
 
     def as_dict(self) -> dict[str, int]:
         return dict(sorted(self.__dict__.items()))
@@ -163,9 +176,14 @@ class BookManager:
         *,
         source: str,
         clock_ns: Callable[[], int] = time.perf_counter_ns,
+        max_future_ms: int = DEFAULT_MAX_FUTURE_MS,
     ) -> None:
+        if max_future_ms < 0:
+            raise ValueError("max_future_ms must be >= 0")
         self.source = source
         self._clock_ns = clock_ns
+        self.max_future_ms = max_future_ms
+        self._accepted = False
         self._markets: dict[str, _MarketState] = {
             m.market_id: _MarketState(market=m, status=m.status) for m in markets
         }
@@ -277,11 +295,15 @@ class BookManager:
                 self.stats.malformed += 1
                 out.extend(self._on_malformed(msg, conn, exc))
                 return self._publish(msg, out, started)
-        if conn is not None and not isinstance(ev, ConnectionEvent):
-            prev = self._confirmed.get(conn)
-            if prev is None or msg.emitted_ts_ms > prev:
-                self._confirmed[conn] = msg.emitted_ts_ms
-        if isinstance(ev, OrderBookSnapshotEvent):
+        self._accepted = False
+        limit = msg.received_ts_ms + self.max_future_ms
+        ex_ts = getattr(ev, "exchange_ts_ms", None)
+        future = msg.emitted_ts_ms > limit or (isinstance(ex_ts, int) and ex_ts > limit)
+        if future:
+            self.stats.future_timestamps += 1
+        if future and isinstance(ev, OrderBookSnapshotEvent | OrderBookDeltaEvent):
+            out.extend(self._quarantine(ev))
+        elif isinstance(ev, OrderBookSnapshotEvent):
             out.extend(self._on_snapshot(msg, ev))
         elif isinstance(ev, OrderBookDeltaEvent):
             out.extend(self._on_delta(msg, ev))
@@ -297,11 +319,37 @@ class BookManager:
                 out.extend(
                     self.mark_connection_lost(ev.connection_id, DesyncReason.CONNECTION_LOST)
                 )
-            else:
+            elif not future:
                 self._confirmed.setdefault(ev.connection_id, msg.emitted_ts_ms)
         elif isinstance(ev, HeartbeatEvent):
-            pass
+            self._accepted = True
+        if self._accepted and not future and conn is not None:
+            prev = self._confirmed.get(conn)
+            if prev is None or msg.emitted_ts_ms > prev:
+                self._confirmed[conn] = msg.emitted_ts_ms
         return self._publish(msg, out, started)
+
+    def _quarantine(
+        self, ev: OrderBookSnapshotEvent | OrderBookDeltaEvent
+    ) -> list[tuple[str, str, str | None]]:
+        """Future-dated book message: consume its sequence number, never apply it."""
+        key = (ev.connection_id, ev.sid)
+        if isinstance(ev, OrderBookDeltaEvent) and key not in self._subs:
+            self.stats.ignored_stale_subscription += 1
+            return []
+        verdict, out = self._check_seq(key, ev.seq)
+        if verdict == "dup":
+            self.stats.duplicates_dropped += 1
+            return out
+        if verdict == "gap":
+            return out
+        st = self._markets.get(ev.market_id)
+        if st is None or (isinstance(ev, OrderBookDeltaEvent) and _market_key(st) != key):
+            return out
+        self.stats.rejected += 1
+        if self._desync(ev.market_id, DesyncReason.FUTURE_TIMESTAMP, ev.connection_id):
+            out.append((ev.market_id, "desync", DesyncReason.FUTURE_TIMESTAMP))
+        return out
 
     def mark_connection_lost(self, connection_id: str, reason: str) -> list[tuple[str, str, str]]:
         """All books on the connection become untrusted (also used by heartbeat timeouts)."""
@@ -401,6 +449,7 @@ class BookManager:
         st.last_sync_ts_ms = msg.received_ts_ms
         self._recovery.get(ev.connection_id, {}).pop(ev.market_id, None)
         self.stats.snapshots_applied += 1
+        self._accepted = True
         out.append((ev.market_id, "snapshot", None))
         return out
 
@@ -456,6 +505,7 @@ class BookManager:
         st.exchange_ts_ms = ev.exchange_ts_ms
         st.received_ts_ms = msg.received_ts_ms
         self.stats.deltas_applied += 1
+        self._accepted = True
         out.append((ev.market_id, "delta", None))
         return out
 
