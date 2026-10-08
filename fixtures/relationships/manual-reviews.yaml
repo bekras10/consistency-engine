@@ -1,0 +1,53 @@
+# Manual relationship reviews (spec 8.4). Version-controlled; applied after discovery by
+# consistency_core.relationships.review.apply_reviews.
+#
+# Rules:
+#  * rules_hashes pin the exact market rules that were reviewed. If any hash no longer matches
+#    the catalog, the review is stale and the relationship drops to candidate_review.
+#  * A reviewer can resolve UNKNOWN evidence but can never override FAIL evidence.
+#  * All markets below are SYNTHETIC (tickers start with SYN); reviewer is a fixture identity.
+schema_version: 1
+reviews:
+  - review_id: fed-hike-equals-upper-bound
+    relationship_type: equivalent
+    members: [SYNFEDHIKE-26SEP-T, SYNFEDUB-26SEP-T]
+    decision: verified
+    reviewer: synthetic-fixture-reviewer
+    reviewed_at: "2026-07-14T12:00:00Z"
+    reasoning: >-
+      The synthetic policy-rate upper bound is 4.50% going into the meeting and the only
+      admissible decisions are hold or +25bp, so "upper bound exceeds 4.50%" holds exactly when
+      the bank hikes. Both contracts settle on the same official statement.
+    rules_hashes:
+      SYNFEDHIKE-26SEP-T: sha256:cb6b87bfea21e7ffafd078fa51017b5b8d1cebe442a27bc58241c87f1713fd52
+      SYNFEDUB-26SEP-T: sha256:1bd862ad4a40e60acf98feeb746f74732fb73c038623c1c63744c1e8361181e8
+
+  - review_id: fed-hike-vs-wire-headline
+    relationship_type: equivalent
+    members: [SYNFEDHIKE-26SEP-T, SYNFEDALT-26SEP-T]
+    decision: rejected
+    reviewer: synthetic-fixture-reviewer
+    reviewed_at: "2026-07-14T12:05:00Z"
+    reasoning: >-
+      Identical titles, but SYNFEDALT settles on the first wire headline, which can be wrong or
+      later corrected; the official statement governs SYNFEDHIKE. Not equivalent.
+    rules_hashes:
+      SYNFEDHIKE-26SEP-T: sha256:cb6b87bfea21e7ffafd078fa51017b5b8d1cebe442a27bc58241c87f1713fd52
+      SYNFEDALT-26SEP-T: sha256:370e63f9c4895e5e6c9af75247b306e4c8daa1999a92c13b61a63fc6bcf8f6c9
+
+  - review_id: owls-champion-implies-finalist
+    relationship_type: implication
+    members: [SYNCHAMP-26-OWLS, SYNFINALS-26-OWLS]
+    decision: verified
+    reviewer: synthetic-fixture-reviewer
+    reviewed_at: "2026-07-14T12:10:00Z"
+    reasoning: >-
+      Under the synthetic league format the championship is decided in the finals, so winning
+      the championship requires reaching the finals. Both settle on official league results for
+      the same postseason; no forfeit/vacated-title paths exist in these rules.
+    scenario_spec:
+      kind: explicit
+      explicit_states: [[0, 0], [0, 1], [1, 1]]
+    rules_hashes:
+      SYNCHAMP-26-OWLS: sha256:8d3bbd50de0aaee2ae6967e0852e8d9dd8a859c985dbf7806c1496554231e22a
+      SYNFINALS-26-OWLS: sha256:e48f8f0ecf27a6e082985956c3eb53483c371a30c93685037ae0e6c74d026751

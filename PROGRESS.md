@@ -142,3 +142,39 @@ Module boundaries for later milestones:
   determinism; queue bounds; backoff; runner reconnect/auth/heartbeat; Kalshi guard.
 - Limitation: `SyntheticDataSource` simulates the session up front, then plays it back; live
   interactive recovery (re-snapshot on demand) is not modelled in milestone 1.
+
+### Phase 5 — relationship engine ✅
+
+- **Scenario spaces** (`relationships/scenarios.py`): EXPLICIT truth tables, CHAIN
+  (`0..01..1`, n+1 states), CARDINALITY (`min_yes..max_yes`). All payoffs are linear in the
+  state vector, so `min_linear` is an exact worst case; for large cardinality groups it is
+  constraint-based (k smallest weights per admissible k) and never enumerates. Spaces ≤ 4096
+  states are enumerable for certificates. Property test: equals brute force over {0,1}^n.
+- **Verification policy** (`relationships/verification.py`): FAIL evidence → REJECTED; else any
+  UNKNOWN → CANDIDATE_REVIEW; only all-PASS → VERIFIED. Identity fields (underlying, measurement,
+  location, window, source, early-close policy; plus unit for numeric contracts) must match;
+  unknown never matches. Rounding/methodology differences → UNKNOWN (review) unless a numeric
+  counterexample exists → FAIL. Exceptional-resolution paths unknown or non-empty → UNKNOWN.
+- **Deterministic discovery** (`relationships/discovery.py`): categorical events
+  (exclusive; partition only if the listed outcomes equal the declared universe); numeric
+  contracts via exact raw-value preimages — equal → EQUIVALENT, strict subset → IMPLICATION,
+  "naive" reported-value containment that fails on raw values → REJECTED with a counterexample;
+  ≥3 same-convention rays → one NESTED_THRESHOLDS chain (narrowest first); disjoint interval
+  bins → DISJOINT_INTERVALS, exhaustive only if `covers` proves the value domain is covered;
+  propositions with a shared id → EQUIVALENT candidate (never auto-verified); title-token match
+  only when an underlying is missing → CANDIDATE_REVIEW at most. Output sorted by id; shuffling
+  the catalog changes nothing (tested).
+- **Manual review** (`relationships/review.py`, `fixtures/relationships/manual-reviews.yaml`):
+  reviews pin members' `rules_hash`; stale → CANDIDATE_REVIEW with invalidation reason; a reviewer
+  resolves UNKNOWN evidence but can never override FAIL; `revalidate` demotes relationships when
+  rules change or members disappear. Reviews: Fed hike ⇔ upper bound (verified), Fed hike vs wire
+  headline (rejected), Owls champion ⇒ finalist (verified, explicit truth table).
+- **Ground truth**: discovery + reviews reproduce all 10 expected synthetic relationships with the
+  expected status/exhaustiveness, and nothing outside them is VERIFIED (tested).
+- **Test G**: `SYNCPI-26AUG-GE0.3` ⇒ `SYNCPI2D-26AUG-GT0.27` REJECTED with witness x = 0.25
+  (reports 0.3 → YES vs 0.25 → NO). False equivalence (identical titles, different source)
+  REJECTED.
+- Data fix: synthetic election markets now declare `early_close_policy="none"` (it was left
+  unknown, which correctly blocked verification). Bundled datasets regenerated (deterministic;
+  message streams unchanged in count).
+- Tests: `tests/unit/test_relationships.py` (26), `tests/property/test_scenarios_property.py`.

@@ -243,7 +243,7 @@
       "rules_version": "1",
       "series_id": "SYNPRES",
       "settlement": {
-        "early_close_policy": null,
+        "early_close_policy": "none",
         "exceptional_resolution": [],
         "location": "Synthetica",
         "measurement": "certified winner of the synthetic presidential election",
@@ -301,7 +301,7 @@
       "rules_version": "1",
       "series_id": "SYNPRES",
       "settlement": {
-        "early_close_policy": null,
+        "early_close_policy": "none",
         "exceptional_resolution": [],
         "location": "Synthetica",
         "measurement": "certified winner of the synthetic presidential election",
@@ -359,7 +359,7 @@
       "rules_version": "1",
       "series_id": "SYNPRES",
       "settlement": {
-        "early_close_policy": null,
+        "early_close_policy": "none",
         "exceptional_resolution": [],
         "location": "Synthetica",
         "measurement": "certified winner of the synthetic presidential election",
@@ -417,7 +417,7 @@
       "rules_version": "1",
       "series_id": "SYNPRES",
       "settlement": {
-        "early_close_policy": null,
+        "early_close_policy": "none",
         "exceptional_resolution": [],
         "location": "Synthetica",
         "measurement": "certified winner of the synthetic presidential election",
@@ -475,7 +475,7 @@
       "rules_version": "1",
       "series_id": "SYNPRES",
       "settlement": {
-        "early_close_policy": null,
+        "early_close_policy": "none",
         "exceptional_resolution": [],
         "location": "Synthetica",
         "measurement": "certified winner of the synthetic presidential election",

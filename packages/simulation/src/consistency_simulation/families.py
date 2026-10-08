@@ -190,6 +190,7 @@ def election_family(ctx: BuildContext) -> Family:
             observation_window="2026-11-03 election, certified by 2026-12-15",
             settlement_source=src,
             methodology="official certification",
+            early_close_policy="none",
             exceptional_resolution=(),
             terms=OutcomeTerms(outcome_id=o),
         )
