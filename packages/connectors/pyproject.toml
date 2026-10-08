@@ -1,0 +1,17 @@
+[project]
+name = "consistency-connectors"
+version = "0.1.0"
+description = "Market-data source interfaces, ingestion core, and provider adapters."
+requires-python = ">=3.12"
+dependencies = ["consistency-core", "consistency-simulation", "pydantic-settings>=2.3"]
+
+[tool.uv.sources]
+consistency-core = { workspace = true }
+consistency-simulation = { workspace = true }
+
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/consistency_connectors"]

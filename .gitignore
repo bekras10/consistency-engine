@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.uv-cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Generated datasets (bundled ones live in fixtures/datasets/<name>/)
+fixtures/datasets/generated/
+
+# Node / frontend (later milestone)
+node_modules/
+.next/
+apps/web/out/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,37 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    env:
+      DATA_SOURCE: synthetic
+      ENABLE_KALSHI_API: "false"
+      KALSHI_AUTHORIZATION_CONFIRMED: "false"
+      ENABLE_LIVE_TRADING: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: uv sync --frozen
+      - name: Ruff lint
+        run: uv run --frozen ruff check .
+      - name: Ruff format
+        run: uv run --frozen ruff format --check .
+      - name: Mypy (strict)
+        run: uv run --frozen mypy
+      - name: Unit + golden tests
+        run: uv run --frozen pytest tests/unit tests/golden tests/replay
+      - name: Property tests
+        run: uv run --frozen pytest tests/property
+      - name: Bundled fixtures are reproducible
+        run: uv run --frozen python scripts/generate_datasets.py --bundled --check

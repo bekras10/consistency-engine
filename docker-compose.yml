@@ -1,0 +1,21 @@
+# Milestone 1: database only. API, worker, and web services are added in later milestones.
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: consistency
+      POSTGRES_PASSWORD: consistency
+      POSTGRES_DB: consistency
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U consistency -d consistency"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  db-data:

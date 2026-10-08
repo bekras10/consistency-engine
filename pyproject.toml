@@ -1,0 +1,107 @@
+[project]
+name = "consistency-engine"
+version = "0.1.0"
+description = "Prediction-market consistency analysis platform (synthetic-first, read-only)."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+dependencies = [
+    "consistency-core",
+    "consistency-simulation",
+    "consistency-connectors",
+    "consistency-api",
+    "consistency-worker",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/core", "packages/simulation", "packages/connectors", "apps/api", "apps/worker"]
+
+[tool.uv.sources]
+consistency-core = { workspace = true }
+consistency-simulation = { workspace = true }
+consistency-connectors = { workspace = true }
+consistency-api = { workspace = true }
+consistency-worker = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.24",
+    "hypothesis>=6.100",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "httpx>=0.27",
+    "types-PyYAML>=6.0",
+]
+
+# --------------------------------------------------------------------------- ruff
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = [
+    "packages/core/src",
+    "packages/simulation/src",
+    "packages/connectors/src",
+    "apps/api/src",
+    "apps/worker/src",
+    "tests",
+]
+extend-exclude = ["apps/web", ".uv-cache"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N", "SIM", "RUF", "C4", "PT", "TID", "FLY", "PIE"]
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["N802", "N806"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"math.fsum".msg = "Money arithmetic must use Decimal; see AGENTS.md."
+
+# --------------------------------------------------------------------------- mypy
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+plugins = ["pydantic.mypy"]
+mypy_path = [
+    "packages/core/src",
+    "packages/simulation/src",
+    "packages/connectors/src",
+    "apps/api/src",
+    "apps/worker/src",
+]
+explicit_package_bases = true
+files = [
+    "packages/core/src",
+    "packages/simulation/src",
+    "packages/connectors/src",
+    "apps/api/src",
+    "apps/worker/src",
+]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+# --------------------------------------------------------------------------- pytest
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-ra --strict-markers"
+markers = [
+    "golden: owner-specified golden fixtures A-J (spec section 15)",
+    "slow: longer-running tests",
+    "integration: requires docker services (later milestone)",
+]
+filterwarnings = [
+    "error",
+    # starlette 1.x deprecates httpx-backed TestClient in favour of httpx2; harmless for tests.
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]
