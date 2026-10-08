@@ -107,3 +107,38 @@ Module boundaries for later milestones:
 - Decision: injected scenarios' expected classifications assume the default `EvaluationConfig`
   and the fictional fee schedule; they are validated end-to-end by the Phase 6 ground-truth
   replay test.
+
+### Phase 4 — ingestion core ✅
+
+- **`MarketDataSource` ABC** (`consistency_connectors.base`): `get_series`, `get_events`,
+  `get_markets`, `get_market_rules`, `get_market_orderbook` (REST-style, *not* sequence-aligned),
+  `subscribe_orderbooks` (async iterator), `unsubscribe_orderbooks`, `request_recovery`,
+  `get_connection_health`.
+- **Sources**: `SyntheticDataSource` (runs the synthetic exchange, records exchange truth per
+  tick for REST-style queries, plays at a speed), `ReplayDataSource` (dataset directory, sha
+  verified), `KalshiDataSource` skeleton — construction refused unless `ENABLE_KALSHI_API` and
+  `KALSHI_AUTHORIZATION_CONFIRMED` are both true; even then every data method raises
+  `NotImplementedError`; the module imports no network client (tested).
+- **`BookManager`**: snapshot/delta application; sequence tracking per subscription; duplicates
+  dropped; a gap desynchronizes every market on that `sid`; malformed wire messages desync the
+  `sid` (or the whole connection if the `sid` is unreadable); negative quantity, off-grid price,
+  crossed book → UNSYNCHRONIZED + recovery request; deltas ignored while untrusted; only a fresh
+  validated snapshot restores trust; late deltas on a superseded `sid` are ignored. Freshness via
+  per-connection `confirmed_through_ms`. Timing metadata (exchange/received ms, processing ns)
+  is excluded from the deterministic `state_digest`.
+- **Queues**: bounded `asyncio.Queue` inbound (backpressure, never drops — dropping would corrupt
+  sequence tracking); `CoalescingQueue` (latest update per market, bounded) toward detection.
+- **`IngestionRunner`**: bounded exponential backoff with seeded jitter; attempts reset only after
+  `reset_after_messages` messages (a peer that goes silent right after subscribing cannot loop
+  forever — found by the heartbeat test); auth errors never retried; heartbeat timeout →
+  `mark_connection_lost(HEARTBEAT_TIMEOUT)`; recovery requests forwarded to the source.
+- **Recovery in recorded sources is in-stream**: recordings already contain the resubscription
+  snapshots a correct client received, so `request_recovery` is recorded but needs no action.
+  A REST snapshot is never used to resync a stream book (it is not sequence-aligned).
+- **Tests** (`tests/unit/test_ingestion.py`, 33): Test H (gap → UNSYNCHRONIZED, deltas ignored,
+  recovery request, resnapshot restores), duplicates, per-sid sequencing, negative/crossed/
+  off-grid, malformed raw, disconnect, lifecycle, freshness, timing; replay of `smoke` and
+  `corruption` reconstructs exchange truth exactly with all markets SYNCHRONIZED; digest
+  determinism; queue bounds; backoff; runner reconnect/auth/heartbeat; Kalshi guard.
+- Limitation: `SyntheticDataSource` simulates the session up front, then plays it back; live
+  interactive recovery (re-snapshot on demand) is not modelled in milestone 1.
