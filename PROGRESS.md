@@ -73,3 +73,37 @@ Module boundaries for later milestones:
   abandoned; others skipped per coordinator instruction). Field names are flagged
   **unverified** in docs/data-contracts.md. The owner later supplied the fee-rounding page and a
   fee-schedule transcription (saved under `docs/sources/`).
+
+### Phase 3 — synthetic exchange ✅
+
+- **Latent state first** (`consistency_simulation.latent`): categorical weights (elections,
+  matches), exact lattice distributions of a raw numeric value (CPI, temperature), Bernoulli,
+  and a chained model (finals ⇒ champion). Integer/`Fraction` arithmetic only — no
+  transcendental floats — so output is bit-identical across platforms for a seed.
+- **Contract probabilities are derived** from the latent state using the *same* exact settlement
+  semantics as the relationship engine (`consistency_core.relationships.numeric`), so e.g. a
+  "CPI ≥ 0.3, reported to 1 dp" contract is priced from P(raw ≥ 0.25).
+- **Quoting** (`quoting.py`): bids at grid prices ≤ p − h (YES) and ≤ (1 − p) − h (NO) ⇒
+  YES ask ≥ p + h; books never cross; baseline has no book-implied arbitrage (tested every tick).
+  Deltas are emitted decreases-first so no intermediate state crosses.
+- **Six families** (`families.py`): election (exhaustive with catch-all + an ambiguous primary),
+  CPI thresholds (1-dp chain + a 2-dp decoy for Test G), temperature bins (exhaustive
+  intervals), soccer (2-way listing = exclusive only; 3-way = exhaustive), equivalent Fed pair
+  (+ false-equivalence decoy with a different settlement source), champion ⇒ finals. Tick
+  grids: cent, tapered `price_ranges`, and 0.001 with fractional quantities.
+- **Eight injected scenarios** (`scenarios.py`) with expected classifications: overpriced narrow
+  threshold, underpriced basket, stale feed, fees eliminate, depth eliminates, static genuine,
+  ambiguous settlement, short-lived.
+- **Event stream** (`exchange.py`): snapshots, deltas (seq per subscription `sid`), status
+  changes, market creation/removal, heartbeats, duplicates, gaps, reordering, malformed raw wire
+  messages, disconnects, lagging feeds; per-connection monotone delivery. After a detectable
+  fault, the recording contains the client's resubscription (fresh snapshots on a new `sid`).
+- **Datasets** (`datasets.py`, `scripts/generate_datasets.py`): `smoke` and `inconsistent` are
+  bundled (≈220 KB total, messages gzipped with mtime=0); `normal`, `high_vol`, `corruption`,
+  `perf_large` (~1,000 markets) are generated on demand into `fixtures/datasets/generated/`
+  (git-ignored). CI regenerates the bundled sets and compares the *decompressed* text.
+- Playback speeds 0.5×/1×/2×/5×/10× (or unpaced) via `stream.playback`; pacing never changes
+  content or order.
+- Decision: injected scenarios' expected classifications assume the default `EvaluationConfig`
+  and the fictional fee schedule; they are validated end-to-end by the Phase 6 ground-truth
+  replay test.

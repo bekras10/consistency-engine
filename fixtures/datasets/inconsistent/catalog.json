@@ -1,0 +1,2084 @@
+{
+  "events": [
+    {
+      "event_id": "SYNPRES-2026",
+      "mutually_exclusive": true,
+      "outcome_set_complete": true,
+      "outcome_universe": [
+        "CANDA",
+        "CANDB",
+        "CANDC",
+        "CANDD",
+        "OTHER"
+      ],
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "series_id": "SYNPRES",
+      "title": "2026 synthetic presidential election winner"
+    },
+    {
+      "event_id": "SYNPRIM-2026",
+      "mutually_exclusive": true,
+      "outcome_set_complete": null,
+      "outcome_universe": null,
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "series_id": "SYNPRES",
+      "title": "2026 synthetic primary nominee"
+    },
+    {
+      "event_id": "SYNCPI-26AUG",
+      "mutually_exclusive": false,
+      "outcome_set_complete": null,
+      "outcome_universe": null,
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "series_id": "SYNCPI",
+      "title": "Aug 2026 synthetic CPI"
+    },
+    {
+      "event_id": "SYNCPI2D-26AUG",
+      "mutually_exclusive": false,
+      "outcome_set_complete": null,
+      "outcome_universe": null,
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "series_id": "SYNCPI2D",
+      "title": "Aug 2026 synthetic CPI (2 dp)"
+    },
+    {
+      "event_id": "SYNHIGH-NYC-26JUL16",
+      "mutually_exclusive": true,
+      "outcome_set_complete": null,
+      "outcome_universe": null,
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "series_id": "SYNHIGH",
+      "title": "Synthetic NYC high, Jul 16"
+    },
+    {
+      "event_id": "SYNSOCCER-26JUL16-NYCBOS",
+      "mutually_exclusive": true,
+      "outcome_set_complete": false,
+      "outcome_universe": [
+        "HOME",
+        "AWAY",
+        "DRAW"
+      ],
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "series_id": "SYNSOCCER",
+      "title": "NYC vs BOS (draw not listed)"
+    },
+    {
+      "event_id": "SYNSOCCER-26JUL16-LASEA",
+      "mutually_exclusive": true,
+      "outcome_set_complete": true,
+      "outcome_universe": [
+        "HOME",
+        "AWAY",
+        "DRAW"
+      ],
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "series_id": "SYNSOCCER",
+      "title": "LA vs SEA (3-way)"
+    },
+    {
+      "event_id": "SYNFEDHIKE-26SEP",
+      "mutually_exclusive": null,
+      "outcome_set_complete": null,
+      "outcome_universe": null,
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "series_id": "SYNFEDHIKE",
+      "title": "Will the synthetic central bank raise rates at its September 2026 meeting?"
+    },
+    {
+      "event_id": "SYNFEDUB-26SEP",
+      "mutually_exclusive": null,
+      "outcome_set_complete": null,
+      "outcome_universe": null,
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "series_id": "SYNFEDUB",
+      "title": "Will the synthetic policy-rate upper bound exceed 4.50% after the September 2026 meeting?"
+    },
+    {
+      "event_id": "SYNFEDALT-26SEP",
+      "mutually_exclusive": null,
+      "outcome_set_complete": null,
+      "outcome_universe": null,
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "series_id": "SYNFEDALT",
+      "title": "Will the synthetic central bank raise rates at its September 2026 meeting?"
+    },
+    {
+      "event_id": "SYNCHAMP-26",
+      "mutually_exclusive": null,
+      "outcome_set_complete": null,
+      "outcome_universe": null,
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "series_id": "SYNCHAMP",
+      "title": "Will the Synthetic Owls win the 2026 championship?"
+    },
+    {
+      "event_id": "SYNFINALS-26",
+      "mutually_exclusive": null,
+      "outcome_set_complete": null,
+      "outcome_universe": null,
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "series_id": "SYNFINALS",
+      "title": "Will the Synthetic Owls reach the 2026 finals?"
+    }
+  ],
+  "markets": [
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. Will candidate A win the 2026 synthetic presidential election?",
+      "event_id": "SYNPRES-2026",
+      "exchange_metadata": {
+        "grid": {
+          "tick_size": 1
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNPRES-2026-CANDA",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "1",
+            "start": "0",
+            "step": "0.01"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "1",
+      "rules_version": "1",
+      "series_id": "SYNPRES",
+      "settlement": {
+        "early_close_policy": null,
+        "exceptional_resolution": [],
+        "location": "Synthetica",
+        "measurement": "certified winner of the synthetic presidential election",
+        "methodology": "official certification",
+        "observation_window": "2026-11-03 election, certified by 2026-12-15",
+        "rounding": null,
+        "settlement_source": "Synthetic Election Commission",
+        "terms": {
+          "kind": "outcome",
+          "outcome_id": "CANDA"
+        },
+        "underlying_id": "synthetic-presidential-2026-winner",
+        "unit": null,
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Resolves YES if candidate A is certified winner by Synthetic Election Commission. Exactly one listed outcome resolves YES; OTHER covers every candidate not listed.",
+      "settlement_source": "Synthetic Election Commission",
+      "status": "open",
+      "ticker": "SYNPRES-2026-CANDA",
+      "title": "Will candidate A win the 2026 synthetic presidential election?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. Will candidate B win the 2026 synthetic presidential election?",
+      "event_id": "SYNPRES-2026",
+      "exchange_metadata": {
+        "grid": {
+          "tick_size": 1
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNPRES-2026-CANDB",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "1",
+            "start": "0",
+            "step": "0.01"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "1",
+      "rules_version": "1",
+      "series_id": "SYNPRES",
+      "settlement": {
+        "early_close_policy": null,
+        "exceptional_resolution": [],
+        "location": "Synthetica",
+        "measurement": "certified winner of the synthetic presidential election",
+        "methodology": "official certification",
+        "observation_window": "2026-11-03 election, certified by 2026-12-15",
+        "rounding": null,
+        "settlement_source": "Synthetic Election Commission",
+        "terms": {
+          "kind": "outcome",
+          "outcome_id": "CANDB"
+        },
+        "underlying_id": "synthetic-presidential-2026-winner",
+        "unit": null,
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Resolves YES if candidate B is certified winner by Synthetic Election Commission. Exactly one listed outcome resolves YES; OTHER covers every candidate not listed.",
+      "settlement_source": "Synthetic Election Commission",
+      "status": "open",
+      "ticker": "SYNPRES-2026-CANDB",
+      "title": "Will candidate B win the 2026 synthetic presidential election?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. Will candidate C win the 2026 synthetic presidential election?",
+      "event_id": "SYNPRES-2026",
+      "exchange_metadata": {
+        "grid": {
+          "tick_size": 1
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNPRES-2026-CANDC",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "1",
+            "start": "0",
+            "step": "0.01"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "1",
+      "rules_version": "1",
+      "series_id": "SYNPRES",
+      "settlement": {
+        "early_close_policy": null,
+        "exceptional_resolution": [],
+        "location": "Synthetica",
+        "measurement": "certified winner of the synthetic presidential election",
+        "methodology": "official certification",
+        "observation_window": "2026-11-03 election, certified by 2026-12-15",
+        "rounding": null,
+        "settlement_source": "Synthetic Election Commission",
+        "terms": {
+          "kind": "outcome",
+          "outcome_id": "CANDC"
+        },
+        "underlying_id": "synthetic-presidential-2026-winner",
+        "unit": null,
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Resolves YES if candidate C is certified winner by Synthetic Election Commission. Exactly one listed outcome resolves YES; OTHER covers every candidate not listed.",
+      "settlement_source": "Synthetic Election Commission",
+      "status": "open",
+      "ticker": "SYNPRES-2026-CANDC",
+      "title": "Will candidate C win the 2026 synthetic presidential election?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. Will candidate D win the 2026 synthetic presidential election?",
+      "event_id": "SYNPRES-2026",
+      "exchange_metadata": {
+        "grid": {
+          "tick_size": 1
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNPRES-2026-CANDD",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "1",
+            "start": "0",
+            "step": "0.01"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "1",
+      "rules_version": "1",
+      "series_id": "SYNPRES",
+      "settlement": {
+        "early_close_policy": null,
+        "exceptional_resolution": [],
+        "location": "Synthetica",
+        "measurement": "certified winner of the synthetic presidential election",
+        "methodology": "official certification",
+        "observation_window": "2026-11-03 election, certified by 2026-12-15",
+        "rounding": null,
+        "settlement_source": "Synthetic Election Commission",
+        "terms": {
+          "kind": "outcome",
+          "outcome_id": "CANDD"
+        },
+        "underlying_id": "synthetic-presidential-2026-winner",
+        "unit": null,
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Resolves YES if candidate D is certified winner by Synthetic Election Commission. Exactly one listed outcome resolves YES; OTHER covers every candidate not listed.",
+      "settlement_source": "Synthetic Election Commission",
+      "status": "open",
+      "ticker": "SYNPRES-2026-CANDD",
+      "title": "Will candidate D win the 2026 synthetic presidential election?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. Will any candidate not otherwise listed win the 2026 synthetic presidential election?",
+      "event_id": "SYNPRES-2026",
+      "exchange_metadata": {
+        "grid": {
+          "tick_size": 1
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNPRES-2026-OTHER",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "1",
+            "start": "0",
+            "step": "0.01"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "1",
+      "rules_version": "1",
+      "series_id": "SYNPRES",
+      "settlement": {
+        "early_close_policy": null,
+        "exceptional_resolution": [],
+        "location": "Synthetica",
+        "measurement": "certified winner of the synthetic presidential election",
+        "methodology": "official certification",
+        "observation_window": "2026-11-03 election, certified by 2026-12-15",
+        "rounding": null,
+        "settlement_source": "Synthetic Election Commission",
+        "terms": {
+          "kind": "outcome",
+          "outcome_id": "OTHER"
+        },
+        "underlying_id": "synthetic-presidential-2026-winner",
+        "unit": null,
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Resolves YES if any candidate not otherwise listed is certified winner by Synthetic Election Commission. Exactly one listed outcome resolves YES; OTHER covers every candidate not listed.",
+      "settlement_source": "Synthetic Election Commission",
+      "status": "open",
+      "ticker": "SYNPRES-2026-OTHER",
+      "title": "Will any candidate not otherwise listed win the 2026 synthetic presidential election?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. Will PX be the synthetic primary nominee?",
+      "event_id": "SYNPRIM-2026",
+      "exchange_metadata": {
+        "grid": {
+          "tick_size": 1
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNPRIM-2026-PX",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "1",
+            "start": "0",
+            "step": "0.01"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "1",
+      "rules_version": "1",
+      "series_id": "SYNPRES",
+      "settlement": {
+        "early_close_policy": null,
+        "exceptional_resolution": null,
+        "location": "Synthetica",
+        "measurement": "nominee of the synthetic primary",
+        "methodology": "party announcement",
+        "observation_window": "2026 primary season",
+        "rounding": null,
+        "settlement_source": "Synthetic Election Commission",
+        "terms": {
+          "kind": "outcome",
+          "outcome_id": "PX"
+        },
+        "underlying_id": "synthetic-primary-2026-nominee",
+        "unit": null,
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Resolves YES if PX is announced nominee. Rules do not specify what happens if no nominee is announced or a nominee withdraws.",
+      "settlement_source": "Synthetic Election Commission",
+      "status": "open",
+      "ticker": "SYNPRIM-2026-PX",
+      "title": "Will PX be the synthetic primary nominee?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. Will PY be the synthetic primary nominee?",
+      "event_id": "SYNPRIM-2026",
+      "exchange_metadata": {
+        "grid": {
+          "tick_size": 1
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNPRIM-2026-PY",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "1",
+            "start": "0",
+            "step": "0.01"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "1",
+      "rules_version": "1",
+      "series_id": "SYNPRES",
+      "settlement": {
+        "early_close_policy": null,
+        "exceptional_resolution": null,
+        "location": "Synthetica",
+        "measurement": "nominee of the synthetic primary",
+        "methodology": "party announcement",
+        "observation_window": "2026 primary season",
+        "rounding": null,
+        "settlement_source": "Synthetic Election Commission",
+        "terms": {
+          "kind": "outcome",
+          "outcome_id": "PY"
+        },
+        "underlying_id": "synthetic-primary-2026-nominee",
+        "unit": null,
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Resolves YES if PY is announced nominee. Rules do not specify what happens if no nominee is announced or a nominee withdraws.",
+      "settlement_source": "Synthetic Election Commission",
+      "status": "open",
+      "ticker": "SYNPRIM-2026-PY",
+      "title": "Will PY be the synthetic primary nominee?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. Will PZ be the synthetic primary nominee?",
+      "event_id": "SYNPRIM-2026",
+      "exchange_metadata": {
+        "grid": {
+          "tick_size": 1
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNPRIM-2026-PZ",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "1",
+            "start": "0",
+            "step": "0.01"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "1",
+      "rules_version": "1",
+      "series_id": "SYNPRES",
+      "settlement": {
+        "early_close_policy": null,
+        "exceptional_resolution": null,
+        "location": "Synthetica",
+        "measurement": "nominee of the synthetic primary",
+        "methodology": "party announcement",
+        "observation_window": "2026 primary season",
+        "rounding": null,
+        "settlement_source": "Synthetic Election Commission",
+        "terms": {
+          "kind": "outcome",
+          "outcome_id": "PZ"
+        },
+        "underlying_id": "synthetic-primary-2026-nominee",
+        "unit": null,
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Resolves YES if PZ is announced nominee. Rules do not specify what happens if no nominee is announced or a nominee withdraws.",
+      "settlement_source": "Synthetic Election Commission",
+      "status": "open",
+      "ticker": "SYNPRIM-2026-PZ",
+      "title": "Will PZ be the synthetic primary nominee?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. Will August 2026 synthetic CPI MoM be >= 0.4%?",
+      "event_id": "SYNCPI-26AUG",
+      "exchange_metadata": {
+        "grid": {
+          "price_ranges": [
+            {
+              "end": "0.1000",
+              "start": "0.0000",
+              "step": "0.0010"
+            },
+            {
+              "end": "0.9000",
+              "start": "0.1000",
+              "step": "0.0100"
+            },
+            {
+              "end": "1.0000",
+              "start": "0.9000",
+              "step": "0.0010"
+            }
+          ]
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNCPI-26AUG-GE0.4",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "0.1000",
+            "start": "0.0000",
+            "step": "0.0010"
+          },
+          {
+            "end": "0.9000",
+            "start": "0.1000",
+            "step": "0.0100"
+          },
+          {
+            "end": "1.0000",
+            "start": "0.9000",
+            "step": "0.0010"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "1",
+      "rules_version": "1",
+      "series_id": "SYNCPI",
+      "settlement": {
+        "early_close_policy": "none",
+        "exceptional_resolution": [],
+        "location": "Synthetica",
+        "measurement": "CPI-U month-over-month % change, seasonally adjusted",
+        "methodology": "headline figure as published (1 dp)",
+        "observation_window": "2026-08",
+        "rounding": {
+          "increment": "0.1",
+          "mode": "half_up"
+        },
+        "settlement_source": "Synthetic Bureau of Statistics",
+        "terms": {
+          "comparator": ">=",
+          "kind": "threshold",
+          "value": "0.4"
+        },
+        "underlying_id": "synthetic-cpi-mom-2026-08",
+        "unit": "percent",
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Will August 2026 synthetic CPI MoM be >= 0.4%? Settles on the Synthetic Bureau of Statistics figure published to one decimal place.",
+      "settlement_source": "Synthetic Bureau of Statistics",
+      "status": "open",
+      "ticker": "SYNCPI-26AUG-GE0.4",
+      "title": "Will August 2026 synthetic CPI MoM be >= 0.4%?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. Will August 2026 synthetic CPI MoM be >= 0.3%?",
+      "event_id": "SYNCPI-26AUG",
+      "exchange_metadata": {
+        "grid": {
+          "price_ranges": [
+            {
+              "end": "0.1000",
+              "start": "0.0000",
+              "step": "0.0010"
+            },
+            {
+              "end": "0.9000",
+              "start": "0.1000",
+              "step": "0.0100"
+            },
+            {
+              "end": "1.0000",
+              "start": "0.9000",
+              "step": "0.0010"
+            }
+          ]
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNCPI-26AUG-GE0.3",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "0.1000",
+            "start": "0.0000",
+            "step": "0.0010"
+          },
+          {
+            "end": "0.9000",
+            "start": "0.1000",
+            "step": "0.0100"
+          },
+          {
+            "end": "1.0000",
+            "start": "0.9000",
+            "step": "0.0010"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "1",
+      "rules_version": "1",
+      "series_id": "SYNCPI",
+      "settlement": {
+        "early_close_policy": "none",
+        "exceptional_resolution": [],
+        "location": "Synthetica",
+        "measurement": "CPI-U month-over-month % change, seasonally adjusted",
+        "methodology": "headline figure as published (1 dp)",
+        "observation_window": "2026-08",
+        "rounding": {
+          "increment": "0.1",
+          "mode": "half_up"
+        },
+        "settlement_source": "Synthetic Bureau of Statistics",
+        "terms": {
+          "comparator": ">=",
+          "kind": "threshold",
+          "value": "0.3"
+        },
+        "underlying_id": "synthetic-cpi-mom-2026-08",
+        "unit": "percent",
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Will August 2026 synthetic CPI MoM be >= 0.3%? Settles on the Synthetic Bureau of Statistics figure published to one decimal place.",
+      "settlement_source": "Synthetic Bureau of Statistics",
+      "status": "open",
+      "ticker": "SYNCPI-26AUG-GE0.3",
+      "title": "Will August 2026 synthetic CPI MoM be >= 0.3%?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. Will August 2026 synthetic CPI MoM be >= 0.2%?",
+      "event_id": "SYNCPI-26AUG",
+      "exchange_metadata": {
+        "grid": {
+          "price_ranges": [
+            {
+              "end": "0.1000",
+              "start": "0.0000",
+              "step": "0.0010"
+            },
+            {
+              "end": "0.9000",
+              "start": "0.1000",
+              "step": "0.0100"
+            },
+            {
+              "end": "1.0000",
+              "start": "0.9000",
+              "step": "0.0010"
+            }
+          ]
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNCPI-26AUG-GE0.2",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "0.1000",
+            "start": "0.0000",
+            "step": "0.0010"
+          },
+          {
+            "end": "0.9000",
+            "start": "0.1000",
+            "step": "0.0100"
+          },
+          {
+            "end": "1.0000",
+            "start": "0.9000",
+            "step": "0.0010"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "1",
+      "rules_version": "1",
+      "series_id": "SYNCPI",
+      "settlement": {
+        "early_close_policy": "none",
+        "exceptional_resolution": [],
+        "location": "Synthetica",
+        "measurement": "CPI-U month-over-month % change, seasonally adjusted",
+        "methodology": "headline figure as published (1 dp)",
+        "observation_window": "2026-08",
+        "rounding": {
+          "increment": "0.1",
+          "mode": "half_up"
+        },
+        "settlement_source": "Synthetic Bureau of Statistics",
+        "terms": {
+          "comparator": ">=",
+          "kind": "threshold",
+          "value": "0.2"
+        },
+        "underlying_id": "synthetic-cpi-mom-2026-08",
+        "unit": "percent",
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Will August 2026 synthetic CPI MoM be >= 0.2%? Settles on the Synthetic Bureau of Statistics figure published to one decimal place.",
+      "settlement_source": "Synthetic Bureau of Statistics",
+      "status": "open",
+      "ticker": "SYNCPI-26AUG-GE0.2",
+      "title": "Will August 2026 synthetic CPI MoM be >= 0.2%?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. Will August 2026 synthetic CPI MoM be >= 0.1%?",
+      "event_id": "SYNCPI-26AUG",
+      "exchange_metadata": {
+        "grid": {
+          "price_ranges": [
+            {
+              "end": "0.1000",
+              "start": "0.0000",
+              "step": "0.0010"
+            },
+            {
+              "end": "0.9000",
+              "start": "0.1000",
+              "step": "0.0100"
+            },
+            {
+              "end": "1.0000",
+              "start": "0.9000",
+              "step": "0.0010"
+            }
+          ]
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNCPI-26AUG-GE0.1",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "0.1000",
+            "start": "0.0000",
+            "step": "0.0010"
+          },
+          {
+            "end": "0.9000",
+            "start": "0.1000",
+            "step": "0.0100"
+          },
+          {
+            "end": "1.0000",
+            "start": "0.9000",
+            "step": "0.0010"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "1",
+      "rules_version": "1",
+      "series_id": "SYNCPI",
+      "settlement": {
+        "early_close_policy": "none",
+        "exceptional_resolution": [],
+        "location": "Synthetica",
+        "measurement": "CPI-U month-over-month % change, seasonally adjusted",
+        "methodology": "headline figure as published (1 dp)",
+        "observation_window": "2026-08",
+        "rounding": {
+          "increment": "0.1",
+          "mode": "half_up"
+        },
+        "settlement_source": "Synthetic Bureau of Statistics",
+        "terms": {
+          "comparator": ">=",
+          "kind": "threshold",
+          "value": "0.1"
+        },
+        "underlying_id": "synthetic-cpi-mom-2026-08",
+        "unit": "percent",
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Will August 2026 synthetic CPI MoM be >= 0.1%? Settles on the Synthetic Bureau of Statistics figure published to one decimal place.",
+      "settlement_source": "Synthetic Bureau of Statistics",
+      "status": "open",
+      "ticker": "SYNCPI-26AUG-GE0.1",
+      "title": "Will August 2026 synthetic CPI MoM be >= 0.1%?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. Will August 2026 synthetic CPI MoM be above 0.27%?",
+      "event_id": "SYNCPI2D-26AUG",
+      "exchange_metadata": {
+        "grid": {
+          "price_ranges": [
+            {
+              "end": "0.1000",
+              "start": "0.0000",
+              "step": "0.0010"
+            },
+            {
+              "end": "0.9000",
+              "start": "0.1000",
+              "step": "0.0100"
+            },
+            {
+              "end": "1.0000",
+              "start": "0.9000",
+              "step": "0.0010"
+            }
+          ]
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNCPI2D-26AUG-GT0.27",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "0.1000",
+            "start": "0.0000",
+            "step": "0.0010"
+          },
+          {
+            "end": "0.9000",
+            "start": "0.1000",
+            "step": "0.0100"
+          },
+          {
+            "end": "1.0000",
+            "start": "0.9000",
+            "step": "0.0010"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "1",
+      "rules_version": "1",
+      "series_id": "SYNCPI2D",
+      "settlement": {
+        "early_close_policy": "none",
+        "exceptional_resolution": [],
+        "location": "Synthetica",
+        "measurement": "CPI-U month-over-month % change, seasonally adjusted",
+        "methodology": "computed from index levels (2 dp)",
+        "observation_window": "2026-08",
+        "rounding": {
+          "increment": "0.01",
+          "mode": "half_up"
+        },
+        "settlement_source": "Synthetic Bureau of Statistics",
+        "terms": {
+          "comparator": ">",
+          "kind": "threshold",
+          "value": "0.27"
+        },
+        "underlying_id": "synthetic-cpi-mom-2026-08",
+        "unit": "percent",
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Will August 2026 synthetic CPI MoM be above 0.27%? Settles on the Synthetic Bureau of Statistics figure computed from index levels, rounded to two decimals.",
+      "settlement_source": "Synthetic Bureau of Statistics",
+      "status": "open",
+      "ticker": "SYNCPI2D-26AUG-GT0.27",
+      "title": "Will August 2026 synthetic CPI MoM be above 0.27%?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. Will the synthetic NYC high on Jul 16 be in [-inf, 80)\u00b0F?",
+      "event_id": "SYNHIGH-NYC-26JUL16",
+      "exchange_metadata": {
+        "grid": {
+          "tick_size": 1
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNHIGH-NYC-26JUL16-B-LT80",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "1",
+            "start": "0",
+            "step": "0.01"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "1",
+      "rules_version": "1",
+      "series_id": "SYNHIGH",
+      "settlement": {
+        "early_close_policy": "none",
+        "exceptional_resolution": [],
+        "location": "Synthetic Central Park station",
+        "measurement": "daily maximum temperature",
+        "methodology": "final climate report, whole degrees F",
+        "observation_window": "2026-07-16 local standard time",
+        "rounding": {
+          "increment": "1",
+          "mode": "half_up"
+        },
+        "settlement_source": "Synthetic Weather Service climate report",
+        "terms": {
+          "kind": "interval",
+          "lower": null,
+          "lower_inclusive": true,
+          "upper": "80",
+          "upper_inclusive": false
+        },
+        "underlying_id": "synthetic-nyc-central-park-high-2026-07-16",
+        "unit": "degF",
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Will the synthetic NYC high on Jul 16 be in [-inf, 80)\u00b0F? Uses Synthetic Weather Service climate report, reported in whole degrees (half up).",
+      "settlement_source": "Synthetic Weather Service climate report",
+      "status": "open",
+      "ticker": "SYNHIGH-NYC-26JUL16-B-LT80",
+      "title": "Will the synthetic NYC high on Jul 16 be in [-inf, 80)\u00b0F?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. Will the synthetic NYC high on Jul 16 be in [80, 85)\u00b0F?",
+      "event_id": "SYNHIGH-NYC-26JUL16",
+      "exchange_metadata": {
+        "grid": {
+          "tick_size": 1
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNHIGH-NYC-26JUL16-B80-84",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "1",
+            "start": "0",
+            "step": "0.01"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "1",
+      "rules_version": "1",
+      "series_id": "SYNHIGH",
+      "settlement": {
+        "early_close_policy": "none",
+        "exceptional_resolution": [],
+        "location": "Synthetic Central Park station",
+        "measurement": "daily maximum temperature",
+        "methodology": "final climate report, whole degrees F",
+        "observation_window": "2026-07-16 local standard time",
+        "rounding": {
+          "increment": "1",
+          "mode": "half_up"
+        },
+        "settlement_source": "Synthetic Weather Service climate report",
+        "terms": {
+          "kind": "interval",
+          "lower": "80",
+          "lower_inclusive": true,
+          "upper": "85",
+          "upper_inclusive": false
+        },
+        "underlying_id": "synthetic-nyc-central-park-high-2026-07-16",
+        "unit": "degF",
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Will the synthetic NYC high on Jul 16 be in [80, 85)\u00b0F? Uses Synthetic Weather Service climate report, reported in whole degrees (half up).",
+      "settlement_source": "Synthetic Weather Service climate report",
+      "status": "open",
+      "ticker": "SYNHIGH-NYC-26JUL16-B80-84",
+      "title": "Will the synthetic NYC high on Jul 16 be in [80, 85)\u00b0F?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. Will the synthetic NYC high on Jul 16 be in [85, 90)\u00b0F?",
+      "event_id": "SYNHIGH-NYC-26JUL16",
+      "exchange_metadata": {
+        "grid": {
+          "tick_size": 1
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNHIGH-NYC-26JUL16-B85-89",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "1",
+            "start": "0",
+            "step": "0.01"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "1",
+      "rules_version": "1",
+      "series_id": "SYNHIGH",
+      "settlement": {
+        "early_close_policy": "none",
+        "exceptional_resolution": [],
+        "location": "Synthetic Central Park station",
+        "measurement": "daily maximum temperature",
+        "methodology": "final climate report, whole degrees F",
+        "observation_window": "2026-07-16 local standard time",
+        "rounding": {
+          "increment": "1",
+          "mode": "half_up"
+        },
+        "settlement_source": "Synthetic Weather Service climate report",
+        "terms": {
+          "kind": "interval",
+          "lower": "85",
+          "lower_inclusive": true,
+          "upper": "90",
+          "upper_inclusive": false
+        },
+        "underlying_id": "synthetic-nyc-central-park-high-2026-07-16",
+        "unit": "degF",
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Will the synthetic NYC high on Jul 16 be in [85, 90)\u00b0F? Uses Synthetic Weather Service climate report, reported in whole degrees (half up).",
+      "settlement_source": "Synthetic Weather Service climate report",
+      "status": "open",
+      "ticker": "SYNHIGH-NYC-26JUL16-B85-89",
+      "title": "Will the synthetic NYC high on Jul 16 be in [85, 90)\u00b0F?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. Will the synthetic NYC high on Jul 16 be in [90, +inf)\u00b0F?",
+      "event_id": "SYNHIGH-NYC-26JUL16",
+      "exchange_metadata": {
+        "grid": {
+          "tick_size": 1
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNHIGH-NYC-26JUL16-B-GE90",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "1",
+            "start": "0",
+            "step": "0.01"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "1",
+      "rules_version": "1",
+      "series_id": "SYNHIGH",
+      "settlement": {
+        "early_close_policy": "none",
+        "exceptional_resolution": [],
+        "location": "Synthetic Central Park station",
+        "measurement": "daily maximum temperature",
+        "methodology": "final climate report, whole degrees F",
+        "observation_window": "2026-07-16 local standard time",
+        "rounding": {
+          "increment": "1",
+          "mode": "half_up"
+        },
+        "settlement_source": "Synthetic Weather Service climate report",
+        "terms": {
+          "kind": "interval",
+          "lower": "90",
+          "lower_inclusive": true,
+          "upper": null,
+          "upper_inclusive": false
+        },
+        "underlying_id": "synthetic-nyc-central-park-high-2026-07-16",
+        "unit": "degF",
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Will the synthetic NYC high on Jul 16 be in [90, +inf)\u00b0F? Uses Synthetic Weather Service climate report, reported in whole degrees (half up).",
+      "settlement_source": "Synthetic Weather Service climate report",
+      "status": "open",
+      "ticker": "SYNHIGH-NYC-26JUL16-B-GE90",
+      "title": "Will the synthetic NYC high on Jul 16 be in [90, +inf)\u00b0F?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. SYNSOCCER-26JUL16-NYCBOS: will the result be HOME?",
+      "event_id": "SYNSOCCER-26JUL16-NYCBOS",
+      "exchange_metadata": {
+        "grid": {
+          "tick_size": 1
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNSOCCER-26JUL16-NYCBOS-HOME",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "1",
+            "start": "0",
+            "step": "0.01"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "1",
+      "rules_version": "1",
+      "series_id": "SYNSOCCER",
+      "settlement": {
+        "early_close_policy": "none",
+        "exceptional_resolution": [],
+        "location": "Synthetic Soccer League",
+        "measurement": "90-minute regulation result",
+        "methodology": "official result after 90 minutes plus stoppage",
+        "observation_window": "2026-07-16 match",
+        "rounding": null,
+        "settlement_source": "Synthetic Soccer League official result",
+        "terms": {
+          "kind": "outcome",
+          "outcome_id": "HOME"
+        },
+        "underlying_id": "synsoccer-26jul16-nycbos-result",
+        "unit": null,
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Resolves YES if the regulation result is HOME per Synthetic Soccer League official result.",
+      "settlement_source": "Synthetic Soccer League official result",
+      "status": "open",
+      "ticker": "SYNSOCCER-26JUL16-NYCBOS-HOME",
+      "title": "SYNSOCCER-26JUL16-NYCBOS: will the result be HOME?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. SYNSOCCER-26JUL16-NYCBOS: will the result be AWAY?",
+      "event_id": "SYNSOCCER-26JUL16-NYCBOS",
+      "exchange_metadata": {
+        "grid": {
+          "tick_size": 1
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNSOCCER-26JUL16-NYCBOS-AWAY",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "1",
+            "start": "0",
+            "step": "0.01"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "1",
+      "rules_version": "1",
+      "series_id": "SYNSOCCER",
+      "settlement": {
+        "early_close_policy": "none",
+        "exceptional_resolution": [],
+        "location": "Synthetic Soccer League",
+        "measurement": "90-minute regulation result",
+        "methodology": "official result after 90 minutes plus stoppage",
+        "observation_window": "2026-07-16 match",
+        "rounding": null,
+        "settlement_source": "Synthetic Soccer League official result",
+        "terms": {
+          "kind": "outcome",
+          "outcome_id": "AWAY"
+        },
+        "underlying_id": "synsoccer-26jul16-nycbos-result",
+        "unit": null,
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Resolves YES if the regulation result is AWAY per Synthetic Soccer League official result.",
+      "settlement_source": "Synthetic Soccer League official result",
+      "status": "open",
+      "ticker": "SYNSOCCER-26JUL16-NYCBOS-AWAY",
+      "title": "SYNSOCCER-26JUL16-NYCBOS: will the result be AWAY?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. SYNSOCCER-26JUL16-LASEA: will the result be HOME?",
+      "event_id": "SYNSOCCER-26JUL16-LASEA",
+      "exchange_metadata": {
+        "grid": {
+          "tick_size": 1
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNSOCCER-26JUL16-LASEA-HOME",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "1",
+            "start": "0",
+            "step": "0.01"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "1",
+      "rules_version": "1",
+      "series_id": "SYNSOCCER",
+      "settlement": {
+        "early_close_policy": "none",
+        "exceptional_resolution": [],
+        "location": "Synthetic Soccer League",
+        "measurement": "90-minute regulation result",
+        "methodology": "official result after 90 minutes plus stoppage",
+        "observation_window": "2026-07-16 match",
+        "rounding": null,
+        "settlement_source": "Synthetic Soccer League official result",
+        "terms": {
+          "kind": "outcome",
+          "outcome_id": "HOME"
+        },
+        "underlying_id": "synsoccer-26jul16-lasea-result",
+        "unit": null,
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Resolves YES if the regulation result is HOME per Synthetic Soccer League official result.",
+      "settlement_source": "Synthetic Soccer League official result",
+      "status": "open",
+      "ticker": "SYNSOCCER-26JUL16-LASEA-HOME",
+      "title": "SYNSOCCER-26JUL16-LASEA: will the result be HOME?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. SYNSOCCER-26JUL16-LASEA: will the result be AWAY?",
+      "event_id": "SYNSOCCER-26JUL16-LASEA",
+      "exchange_metadata": {
+        "grid": {
+          "tick_size": 1
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNSOCCER-26JUL16-LASEA-AWAY",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "1",
+            "start": "0",
+            "step": "0.01"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "1",
+      "rules_version": "1",
+      "series_id": "SYNSOCCER",
+      "settlement": {
+        "early_close_policy": "none",
+        "exceptional_resolution": [],
+        "location": "Synthetic Soccer League",
+        "measurement": "90-minute regulation result",
+        "methodology": "official result after 90 minutes plus stoppage",
+        "observation_window": "2026-07-16 match",
+        "rounding": null,
+        "settlement_source": "Synthetic Soccer League official result",
+        "terms": {
+          "kind": "outcome",
+          "outcome_id": "AWAY"
+        },
+        "underlying_id": "synsoccer-26jul16-lasea-result",
+        "unit": null,
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Resolves YES if the regulation result is AWAY per Synthetic Soccer League official result.",
+      "settlement_source": "Synthetic Soccer League official result",
+      "status": "open",
+      "ticker": "SYNSOCCER-26JUL16-LASEA-AWAY",
+      "title": "SYNSOCCER-26JUL16-LASEA: will the result be AWAY?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. SYNSOCCER-26JUL16-LASEA: will the result be DRAW?",
+      "event_id": "SYNSOCCER-26JUL16-LASEA",
+      "exchange_metadata": {
+        "grid": {
+          "tick_size": 1
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNSOCCER-26JUL16-LASEA-DRAW",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "1",
+            "start": "0",
+            "step": "0.01"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "1",
+      "rules_version": "1",
+      "series_id": "SYNSOCCER",
+      "settlement": {
+        "early_close_policy": "none",
+        "exceptional_resolution": [],
+        "location": "Synthetic Soccer League",
+        "measurement": "90-minute regulation result",
+        "methodology": "official result after 90 minutes plus stoppage",
+        "observation_window": "2026-07-16 match",
+        "rounding": null,
+        "settlement_source": "Synthetic Soccer League official result",
+        "terms": {
+          "kind": "outcome",
+          "outcome_id": "DRAW"
+        },
+        "underlying_id": "synsoccer-26jul16-lasea-result",
+        "unit": null,
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Resolves YES if the regulation result is DRAW per Synthetic Soccer League official result.",
+      "settlement_source": "Synthetic Soccer League official result",
+      "status": "open",
+      "ticker": "SYNSOCCER-26JUL16-LASEA-DRAW",
+      "title": "SYNSOCCER-26JUL16-LASEA: will the result be DRAW?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. Will the synthetic central bank raise rates at its September 2026 meeting?",
+      "event_id": "SYNFEDHIKE-26SEP",
+      "exchange_metadata": {
+        "grid": {
+          "tick_size_dollars": "0.001"
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNFEDHIKE-26SEP-T",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "1",
+            "start": "0",
+            "step": "0.001"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "0.01",
+      "rules_version": "1",
+      "series_id": "SYNFEDHIKE",
+      "settlement": {
+        "early_close_policy": "none",
+        "exceptional_resolution": [],
+        "location": "Synthetica",
+        "measurement": "policy decision at the September 2026 meeting",
+        "methodology": "official statement",
+        "observation_window": "2026-09 meeting",
+        "rounding": null,
+        "settlement_source": "Synthetic Central Bank statement",
+        "terms": {
+          "kind": "proposition",
+          "proposition_id": "synthetic-fomc-2026-09-hike"
+        },
+        "underlying_id": "synthetic-fomc-2026-09-hike",
+        "unit": null,
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Will the synthetic central bank raise rates at its September 2026 meeting? Resolves per Synthetic Central Bank statement.",
+      "settlement_source": "Synthetic Central Bank statement",
+      "status": "open",
+      "ticker": "SYNFEDHIKE-26SEP-T",
+      "title": "Will the synthetic central bank raise rates at its September 2026 meeting?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. Will the synthetic policy-rate upper bound exceed 4.50% after the September 2026 meeting?",
+      "event_id": "SYNFEDUB-26SEP",
+      "exchange_metadata": {
+        "grid": {
+          "tick_size_dollars": "0.001"
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNFEDUB-26SEP-T",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "1",
+            "start": "0",
+            "step": "0.001"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "0.01",
+      "rules_version": "1",
+      "series_id": "SYNFEDUB",
+      "settlement": {
+        "early_close_policy": "none",
+        "exceptional_resolution": [],
+        "location": "Synthetica",
+        "measurement": "policy decision at the September 2026 meeting",
+        "methodology": "official statement",
+        "observation_window": "2026-09 meeting",
+        "rounding": null,
+        "settlement_source": "Synthetic Central Bank statement",
+        "terms": {
+          "kind": "proposition",
+          "proposition_id": "synthetic-fomc-2026-09-hike"
+        },
+        "underlying_id": "synthetic-fomc-2026-09-hike",
+        "unit": null,
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Will the synthetic policy-rate upper bound exceed 4.50% after the September 2026 meeting? Resolves per Synthetic Central Bank statement.",
+      "settlement_source": "Synthetic Central Bank statement",
+      "status": "open",
+      "ticker": "SYNFEDUB-26SEP-T",
+      "title": "Will the synthetic policy-rate upper bound exceed 4.50% after the September 2026 meeting?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. Will the synthetic central bank raise rates at its September 2026 meeting?",
+      "event_id": "SYNFEDALT-26SEP",
+      "exchange_metadata": {
+        "grid": {
+          "tick_size_dollars": "0.001"
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNFEDALT-26SEP-T",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "1",
+            "start": "0",
+            "step": "0.001"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "0.01",
+      "rules_version": "1",
+      "series_id": "SYNFEDALT",
+      "settlement": {
+        "early_close_policy": "none",
+        "exceptional_resolution": [],
+        "location": "Synthetica",
+        "measurement": "policy decision at the September 2026 meeting",
+        "methodology": "first wire headline",
+        "observation_window": "2026-09 meeting",
+        "rounding": null,
+        "settlement_source": "Synthetic Wire Service headline",
+        "terms": {
+          "kind": "proposition",
+          "proposition_id": "synthetic-fomc-2026-09-hike"
+        },
+        "underlying_id": "synthetic-fomc-2026-09-hike",
+        "unit": null,
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Will the synthetic central bank raise rates at its September 2026 meeting? Resolves per Synthetic Wire Service headline.",
+      "settlement_source": "Synthetic Wire Service headline",
+      "status": "open",
+      "ticker": "SYNFEDALT-26SEP-T",
+      "title": "Will the synthetic central bank raise rates at its September 2026 meeting?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. Will the Synthetic Owls win the 2026 championship?",
+      "event_id": "SYNCHAMP-26",
+      "exchange_metadata": {
+        "grid": {
+          "tick_size": 1
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNCHAMP-26-OWLS",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "1",
+            "start": "0",
+            "step": "0.01"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "1",
+      "rules_version": "1",
+      "series_id": "SYNCHAMP",
+      "settlement": {
+        "early_close_policy": "none",
+        "exceptional_resolution": [],
+        "location": "Synthetic Basketball League",
+        "measurement": "synthetic-owls-2026-champion",
+        "methodology": "official league standings",
+        "observation_window": "2026 postseason",
+        "rounding": null,
+        "settlement_source": "Synthetic Basketball League",
+        "terms": {
+          "kind": "proposition",
+          "proposition_id": "synthetic-owls-2026-champion"
+        },
+        "underlying_id": "synthetic-owls-2026-postseason",
+        "unit": null,
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Will the Synthetic Owls win the 2026 championship? Resolves per Synthetic Basketball League official results.",
+      "settlement_source": "Synthetic Basketball League",
+      "status": "open",
+      "ticker": "SYNCHAMP-26-OWLS",
+      "title": "Will the Synthetic Owls win the 2026 championship?"
+    },
+    {
+      "close_time": "2026-07-18T14:00:00Z",
+      "description": "SYNTHETIC market. Will the Synthetic Owls reach the 2026 finals?",
+      "event_id": "SYNFINALS-26",
+      "exchange_metadata": {
+        "grid": {
+          "tick_size": 1
+        },
+        "synthetic": true
+      },
+      "expiration_time": "2026-07-19T14:00:00Z",
+      "market_id": "SYNFINALS-26-OWLS",
+      "open_time": "2026-07-14T14:00:00Z",
+      "outcome_type": "binary",
+      "price_grid": {
+        "ranges": [
+          {
+            "end": "1",
+            "start": "0",
+            "step": "0.01"
+          }
+        ]
+      },
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "quantity_increment": "1",
+      "rules_version": "1",
+      "series_id": "SYNFINALS",
+      "settlement": {
+        "early_close_policy": "none",
+        "exceptional_resolution": [],
+        "location": "Synthetic Basketball League",
+        "measurement": "synthetic-owls-2026-finalist",
+        "methodology": "official league standings",
+        "observation_window": "2026 postseason",
+        "rounding": null,
+        "settlement_source": "Synthetic Basketball League",
+        "terms": {
+          "kind": "proposition",
+          "proposition_id": "synthetic-owls-2026-finalist"
+        },
+        "underlying_id": "synthetic-owls-2026-postseason",
+        "unit": null,
+        "value_domain_lower": null,
+        "value_domain_upper": null
+      },
+      "settlement_rules": "Will the Synthetic Owls reach the 2026 finals? Resolves per Synthetic Basketball League official results.",
+      "settlement_source": "Synthetic Basketball League",
+      "status": "open",
+      "ticker": "SYNFINALS-26-OWLS",
+      "title": "Will the Synthetic Owls reach the 2026 finals?"
+    }
+  ],
+  "series": [
+    {
+      "category": "politics",
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "series_id": "SYNPRES",
+      "title": "Synthetic presidential election"
+    },
+    {
+      "category": "economics",
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "series_id": "SYNCPI",
+      "title": "Synthetic CPI MoM (published, 1 dp)"
+    },
+    {
+      "category": "economics",
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "series_id": "SYNCPI2D",
+      "title": "Synthetic CPI MoM (index-derived, 2 dp)"
+    },
+    {
+      "category": "climate",
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "series_id": "SYNHIGH",
+      "title": "Synthetic NYC daily high"
+    },
+    {
+      "category": "sports",
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "series_id": "SYNSOCCER",
+      "title": "Synthetic soccer results"
+    },
+    {
+      "category": "macro",
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "series_id": "SYNFEDHIKE",
+      "title": "Will the synthetic central bank raise rates at its September 2026 meeting?"
+    },
+    {
+      "category": "macro",
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "series_id": "SYNFEDUB",
+      "title": "Will the synthetic policy-rate upper bound exceed 4.50% after the September 2026 meeting?"
+    },
+    {
+      "category": "macro",
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "series_id": "SYNFEDALT",
+      "title": "Will the synthetic central bank raise rates at its September 2026 meeting?"
+    },
+    {
+      "category": "sports",
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "series_id": "SYNCHAMP",
+      "title": "Will the Synthetic Owls win the 2026 championship?"
+    },
+    {
+      "category": "sports",
+      "provenance": {
+        "dataset_id": "inconsistent",
+        "generator_version": "synthetic-exchange/1.0.0",
+        "retrieved_at": null,
+        "seed": 505,
+        "source_id": "synthetic-exchange",
+        "source_kind": "synthetic"
+      },
+      "series_id": "SYNFINALS",
+      "title": "Will the Synthetic Owls reach the 2026 finals?"
+    }
+  ]
+}

@@ -109,4 +109,8 @@ class SettlementSpec(FrozenModel):
     early_close_policy: str | None = None
     exceptional_resolution: tuple[str, ...] | None = None
     """Known exceptional outcomes (e.g. ``"void_refund"``). ``()`` = none; ``None`` = unknown."""
+    value_domain_lower: Dec | None = None
+    """Inclusive lower bound of admissible raw values (None = unbounded)."""
+    value_domain_upper: Dec | None = None
+    """Inclusive upper bound of admissible raw values (None = unbounded)."""
     terms: ContractTerms | None = Field(default=None, discriminator="kind")

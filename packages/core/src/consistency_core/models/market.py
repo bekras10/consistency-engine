@@ -100,3 +100,26 @@ class Market(FrozenModel):
     @property
     def rules_hash(self) -> str:
         return compute_rules_hash(self.settlement_rules, self.settlement)
+
+
+class Catalog(FrozenModel):
+    """Reference data supplied by a data source."""
+
+    series: tuple[Series, ...] = ()
+    events: tuple[Event, ...] = ()
+    markets: tuple[Market, ...] = ()
+
+    def market(self, market_id: str) -> Market:
+        for m in self.markets:
+            if m.market_id == market_id:
+                return m
+        raise KeyError(market_id)
+
+    def event(self, event_id: str) -> Event:
+        for e in self.events:
+            if e.event_id == event_id:
+                return e
+        raise KeyError(event_id)
+
+    def markets_by_id(self) -> dict[str, Market]:
+        return {m.market_id: m for m in self.markets}

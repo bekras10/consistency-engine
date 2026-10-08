@@ -140,6 +140,10 @@ class OrderBook(FrozenModel):
     exchange_ts_ms: int | None = None
     received_ts_ms: int
     last_sync_ts_ms: int | None = None
+    confirmed_through_ms: int | None = None
+    """Exchange time up to which this book is known complete: the emission time of the latest
+    in-order message received on its connection. A quiet market stays fresh as long as its
+    connection keeps delivering (deltas for other markets or heartbeats)."""
     yes_bids: tuple[PriceLevel, ...] = ()
     no_bids: tuple[PriceLevel, ...] = ()
     sync_status: SyncStatus = SyncStatus.SYNCHRONIZED
@@ -187,7 +191,13 @@ class OrderBook(FrozenModel):
 
     @property
     def observed_ts_ms(self) -> int:
-        """Timestamp used for cross-market skew: exchange time when supplied, else receipt."""
+        """Time at which this book state is known valid (used for age and cross-market skew).
+
+        Preference: ``confirmed_through_ms``, else the exchange timestamp of the last update,
+        else local receipt time.
+        """
+        if self.confirmed_through_ms is not None:
+            return self.confirmed_through_ms
         return self.exchange_ts_ms if self.exchange_ts_ms is not None else self.received_ts_ms
 
 

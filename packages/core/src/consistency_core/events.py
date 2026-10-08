@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import Field, JsonValue
 
 from consistency_core.models.common import FrozenModel, MarketStatus, Side
 from consistency_core.models.market import Market
@@ -70,15 +70,29 @@ class HeartbeatEvent(FrozenModel):
     connection_id: str
 
 
+class RawWireEvent(FrozenModel):
+    """An un-normalized wire payload (exchange JSON). The ingestion layer must normalize it and
+    treat any failure as a loss of trust in the carrying subscription/connection."""
+
+    type: Literal["raw_wire"] = "raw_wire"
+    connection_id: str
+    payload: dict[str, JsonValue]
+
+
 StreamEvent = Annotated[
     OrderBookSnapshotEvent
     | OrderBookDeltaEvent
     | MarketStatusEvent
     | MarketLifecycleEvent
     | ConnectionEvent
-    | HeartbeatEvent,
+    | HeartbeatEvent
+    | RawWireEvent,
     Field(discriminator="type"),
 ]
+
+
+def event_connection(event: object) -> str | None:
+    return getattr(event, "connection_id", None)
 
 
 class StreamMessage(FrozenModel):

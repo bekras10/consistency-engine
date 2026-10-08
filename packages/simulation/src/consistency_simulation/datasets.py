@@ -1,0 +1,187 @@
+"""Dataset presets (spec 3.5), deterministic serialisation, and loading.
+
+Layout of a dataset directory::
+
+    metadata.json   generator version, seed, config, counts, expected relationships/findings,
+                    final exchange-side books, sha256 of messages.jsonl
+    catalog.json    series, events, markets at session start
+    messages.jsonl.gz  one StreamMessage per line, canonical JSON (Decimals as strings),
+                       gzip-compressed with mtime=0. Reproducibility is checked on the
+                       *decompressed* text (sha256 in metadata), not on compressed bytes,
+                       so zlib version differences cannot cause false mismatches.
+"""
+
+from __future__ import annotations
+
+import gzip
+import hashlib
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from consistency_core.events import StreamMessage
+from consistency_core.models.market import Catalog
+from consistency_core.serialization import canonical_json
+from consistency_simulation import GENERATOR_VERSION
+from consistency_simulation.exchange import (
+    FaultKind,
+    FaultSpec,
+    SessionConfig,
+    SessionResult,
+    SyntheticExchange,
+)
+from consistency_simulation.families import SIM_EPOCH
+
+F = FaultKind
+
+PRESETS: dict[str, SessionConfig] = {
+    "smoke": SessionConfig(
+        name="smoke",
+        seed=101,
+        duration_ms=20_000,
+        description="Small smoke test: all six families, one duplicate, one gap + recovery.",
+        faults=(
+            FaultSpec(F.DUPLICATE, 5_000, "econ"),
+            FaultSpec(F.GAP, 9_000, "weather"),
+        ),
+    ),
+    "normal": SessionConfig(
+        name="normal",
+        seed=202,
+        duration_ms=600_000,
+        description="Ten-minute normal session with lifecycle and status events.",
+        faults=(
+            FaultSpec(F.DUPLICATE, 30_000, "election"),
+            FaultSpec(F.PAUSE, 60_000, "sports", duration_ms=20_000, market_index=0),
+            FaultSpec(F.CREATE_MARKET, 120_000, "econ"),
+            FaultSpec(F.GAP, 200_000, "implication"),
+            FaultSpec(F.REMOVE_MARKET, 500_000, "econ", market_index=4),
+        ),
+    ),
+    "high_vol": SessionConfig(
+        name="high_vol",
+        seed=303,
+        duration_ms=300_000,
+        tick_ms=100,
+        volatility_pct=300,
+        step_permille=650,
+        churn_permille=150,
+        description="Five-minute high-volatility session (fast ticks, large latent moves).",
+    ),
+    "corruption": SessionConfig(
+        name="corruption",
+        seed=404,
+        duration_ms=180_000,
+        description="Data-corruption and recovery: gaps, duplicates, reordering, malformed "
+        "messages, a disconnect, and a lagging feed; every fault is followed by recovery.",
+        faults=(
+            FaultSpec(F.GAP, 10_000, "econ"),
+            FaultSpec(F.DUPLICATE, 15_000, "election"),
+            FaultSpec(F.DUPLICATE, 15_250, "election"),
+            FaultSpec(F.REORDER, 25_000, "sports"),
+            FaultSpec(F.MALFORMED, 40_000, "weather"),
+            FaultSpec(F.DISCONNECT, 60_000, "equivalent", duration_ms=5_000),
+            FaultSpec(F.LAG, 80_000, "implication", duration_ms=10_000, extra_ms=4_000),
+            FaultSpec(F.GAP, 100_000, "election"),
+            FaultSpec(F.GAP, 100_250, "election"),
+            FaultSpec(F.MALFORMED, 120_000, "econ"),
+            FaultSpec(F.REORDER, 140_000, "equivalent"),
+            FaultSpec(F.DUPLICATE, 150_000, "weather"),
+        ),
+    ),
+    "inconsistent": SessionConfig(
+        name="inconsistent",
+        seed=505,
+        duration_ms=126_000,
+        description="Deliberately inconsistent session: the eight spec-3.3 scenarios, each "
+        "with a ground-truth expected classification.",
+        inject_standard_scenarios=True,
+        scenario_t0_ms=4_000,
+    ),
+    "perf_large": SessionConfig(
+        name="perf_large",
+        seed=606,
+        duration_ms=60_000,
+        instances=34,
+        description="Large-scale performance dataset (~1,000 markets). Generated on demand; "
+        "not bundled.",
+    ),
+}
+
+BUNDLED = ("smoke", "inconsistent")
+
+
+@dataclass
+class Dataset:
+    metadata: dict[str, Any]
+    catalog: Catalog
+    messages: list[StreamMessage]
+
+
+def build(name_or_config: str | SessionConfig) -> SessionResult:
+    cfg = PRESETS[name_or_config] if isinstance(name_or_config, str) else name_or_config
+    return SyntheticExchange(cfg).run()
+
+
+def _messages_text(messages: list[StreamMessage]) -> str:
+    return "".join(canonical_json(m) + "\n" for m in messages)
+
+
+def render(result: SessionResult) -> dict[str, str]:
+    """Logical file name -> exact text contents (deterministic). messages are stored gzipped."""
+    msg_text = _messages_text(result.messages)
+    metadata = {
+        "dataset": result.config.name,
+        "description": result.config.description,
+        "synthetic": True,
+        "disclaimer": "Fully synthetic data generated by Consistency Engine. Not real market "
+        "data; supports no empirical claim about any real exchange.",
+        "generator_version": GENERATOR_VERSION,
+        "seed": result.config.seed,
+        "sim_epoch": SIM_EPOCH.isoformat(),
+        "config": result.config.to_json(),
+        "counts": result.counts,
+        "expected_relationships": result.expected_relationships,
+        "expected_findings": [f.to_json() for f in result.expected_findings],
+        "final_books": result.final_books,
+        "messages_sha256": hashlib.sha256(msg_text.encode()).hexdigest(),
+    }
+    catalog_json = json.loads(canonical_json(result.catalog))
+    return {
+        "metadata.json": json.dumps(metadata, indent=2, sort_keys=True) + "\n",
+        "catalog.json": json.dumps(catalog_json, indent=2, sort_keys=True) + "\n",
+        "messages.jsonl": msg_text,
+    }
+
+
+MESSAGES_FILE = "messages.jsonl.gz"
+
+
+def write(result: SessionResult, directory: Path) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    for name, text in render(result).items():
+        if name == "messages.jsonl":
+            data = gzip.compress(text.encode("utf-8"), compresslevel=9, mtime=0)
+            (directory / MESSAGES_FILE).write_bytes(data)
+        else:
+            (directory / name).write_text(text, encoding="utf-8")
+
+
+def read_text(directory: Path, name: str) -> str | None:
+    """Read a logical dataset file (transparently decompressing messages)."""
+    if name == "messages.jsonl":
+        path = directory / MESSAGES_FILE
+        return gzip.decompress(path.read_bytes()).decode("utf-8") if path.exists() else None
+    path = directory / name
+    return path.read_text(encoding="utf-8") if path.exists() else None
+
+
+def load(directory: Path) -> Dataset:
+    metadata = json.loads((directory / "metadata.json").read_text(encoding="utf-8"))
+    catalog = Catalog.model_validate_json((directory / "catalog.json").read_text(encoding="utf-8"))
+    text = read_text(directory, "messages.jsonl") or ""
+    if hashlib.sha256(text.encode()).hexdigest() != metadata["messages_sha256"]:
+        raise ValueError(f"{directory}: messages.jsonl does not match metadata sha256")
+    messages = [StreamMessage.model_validate_json(line) for line in text.splitlines() if line]
+    return Dataset(metadata=metadata, catalog=catalog, messages=messages)
