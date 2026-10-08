@@ -432,6 +432,7 @@ class _FlakySource(MarketDataSource):
     """Fails with a connection error once, then serves one snapshot."""
 
     kind = DataSourceKind.SYNTHETIC
+    stream_is_finite = True  # a scripted run: the final stream end is expected
 
     def __init__(self, fail_with: Exception) -> None:
         self.calls = 0

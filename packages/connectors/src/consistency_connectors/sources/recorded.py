@@ -22,6 +22,8 @@ class RecordedStreamSource(MarketDataSource):
     already contain the resubscription snapshots that followed each detectable fault, so
     :meth:`request_recovery` only records the request (exposed via health/stats)."""
 
+    stream_is_finite = True
+
     def __init__(
         self,
         kind: DataSourceKind,

@@ -48,6 +48,9 @@ class SourceAuthenticationError(RuntimeError):
 
 class MarketDataSource(abc.ABC):
     kind: DataSourceKind
+    stream_is_finite: bool = False
+    """True for recordings, whose stream ends by design. For live sources the end of the stream
+    is unexpected: the runner desynchronizes every book on it and stops in FAILED state."""
 
     @abc.abstractmethod
     async def get_series(self) -> Sequence[Series]: ...

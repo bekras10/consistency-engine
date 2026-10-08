@@ -6,7 +6,7 @@ from consistency_connectors.ingestion.book_manager import (
     DesyncReason,
     Timing,
 )
-from consistency_connectors.ingestion.queues import CoalescingQueue
+from consistency_connectors.ingestion.queues import CoalescingQueue, merge_book_updates
 from consistency_connectors.ingestion.runner import Backoff, IngestionRunner
 
 __all__ = [
@@ -17,4 +17,5 @@ __all__ = [
     "DesyncReason",
     "IngestionRunner",
     "Timing",
+    "merge_book_updates",
 ]

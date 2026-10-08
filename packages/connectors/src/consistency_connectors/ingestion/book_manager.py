@@ -59,6 +59,11 @@ class DesyncReason:
     CROSSED_BOOK = "CROSSED_BOOK"
     CONNECTION_LOST = "CONNECTION_LOST"
     HEARTBEAT_TIMEOUT = "HEARTBEAT_TIMEOUT"
+    END_OF_STREAM = "END_OF_STREAM"
+    AUTHENTICATION_FAILED = "AUTHENTICATION_FAILED"
+    RECONNECT_EXHAUSTED = "RECONNECT_EXHAUSTED"
+    SOURCE_ERROR = "SOURCE_ERROR"
+    RUNNER_STOPPED = "RUNNER_STOPPED"
 
 
 @dataclass(frozen=True)
@@ -87,6 +92,9 @@ class BookUpdate:
     subscription_id: str | None
     source_sequence: int | None
     timing: Timing
+    interrupted: bool = False
+    """True when this update superseded a pending, unconsumed desync for the market (see
+    :func:`consistency_connectors.ingestion.queues.merge_book_updates`)."""
 
 
 @dataclass
@@ -292,6 +300,16 @@ class BookManager:
         self._confirmed.pop(connection_id, None)
         return out
 
+    def connection_lost(self, connection_id: str, reason: str) -> list[BookUpdate]:
+        """Out-of-band loss (no market-data message): desync every market on the connection and
+        return the notifications to publish. Markets already UNSYNCHRONIZED are not repeated."""
+        started = self._clock_ns()
+        items: list[tuple[str, str, str | None]] = list(
+            self.mark_connection_lost(connection_id, reason)
+        )
+        received = self.last_received_ts_ms if self.last_received_ts_ms is not None else 0
+        return self._build_updates(items, self.last_position, None, received, started)
+
     # ------------------------------------------------------------------ handlers
     def _desync(self, market_id: str, reason: str, connection_id: str | None) -> bool:
         st = self._markets.get(market_id)
@@ -464,17 +482,33 @@ class BookManager:
     def _publish(
         self, msg: StreamMessage, items: list[tuple[str, str, str | None]], started: int
     ) -> list[BookUpdate]:
+        ex_ts = getattr(msg.event, "exchange_ts_ms", None)
+        return self._build_updates(
+            items,
+            msg.position,
+            ex_ts if isinstance(ex_ts, int) else None,
+            msg.received_ts_ms,
+            started,
+        )
+
+    def _build_updates(
+        self,
+        items: list[tuple[str, str, str | None]],
+        position: int,
+        ex_ts: int | None,
+        received_ts_ms: int,
+        started: int,
+    ) -> list[BookUpdate]:
         if not items:
             return []
         done = self._clock_ns()
-        ex_ts = getattr(msg.event, "exchange_ts_ms", None)
         out = []
         for mid, kind, reason in items:
             st = self._markets.get(mid)
             out.append(
                 BookUpdate(
                     market_id=mid,
-                    position=msg.position,
+                    position=position,
                     kind=kind,
                     sync_status=st.sync if st is not None else SyncStatus.UNSYNCHRONIZED,
                     reason=reason,
@@ -482,8 +516,8 @@ class BookManager:
                     subscription_id=st.sid if st is not None else None,
                     source_sequence=st.last_seq if st is not None else None,
                     timing=Timing(
-                        exchange_ts_ms=ex_ts if isinstance(ex_ts, int) else None,
-                        received_ts_ms=msg.received_ts_ms,
+                        exchange_ts_ms=ex_ts,
+                        received_ts_ms=received_ts_ms,
                         processing_started_ns=started,
                         processing_completed_ns=done,
                     ),
