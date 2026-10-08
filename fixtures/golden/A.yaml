@@ -1,0 +1,66 @@
+# Golden fixture A — correct implication (spec 15, "Test A").
+# A = "value >= 3.0" implies B = "value >= 2.0" (same observation, no rounding).
+# Buy NO(A) at $0.30 (YES bid on A at $0.70) and YES(B) at $0.35 (NO bid on B at $0.65).
+# Fees: SYNTHETIC-FICTIONAL schedule (taker 0.05, M=1, NON_DIRECT $0.01). Hand arithmetic is in
+# tests/golden/test_golden_pricing.py.
+fixture: A
+title: Correct implication
+common_settlement:
+  underlying_id: golden-a-index
+  measurement: golden index level
+  location: synthetic
+  observation_window: "2026-08-01"
+  settlement_source: Synthetic Bureau
+  methodology: published
+  unit: points
+  early_close_policy: none
+  exceptional_resolution: []
+markets:
+  - id: GOLD-A-GE3
+    terms: {kind: threshold, comparator: ">=", value: "3.0"}
+  - id: GOLD-A-GE2
+    terms: {kind: threshold, comparator: ">=", value: "2.0"}
+books:
+  GOLD-A-GE3: {yes_bids: [["0.70", "100"]], age_ms: 100}
+  GOLD-A-GE2: {no_bids: [["0.65", "100"]], age_ms: 100}
+cases:
+  default:
+    relationship: {type: implication, members: [GOLD-A-GE3, GOLD-A-GE2]}
+    portfolio: {template: implication, legs: [[GOLD-A-GE3, "no"], [GOLD-A-GE2, "yes"]]}
+    observed_duration_ms: 5000
+    expected:
+      classification: FEE_ADJUSTED_CANDIDATE
+      reason_codes: []
+      payoff_min_per_unit: "1"
+      top_of_book: {premium_per_unit: "0.65", min_payoff_per_unit: "1", pre_fee_edge_per_unit: "0.35"}
+      capacity: {quantity_step: "1", domain_lower: "10", max_supported_quantity: "100", best_execution_quantity: "100"}
+      at_quantity:
+        quantity: "100"
+        total_premium: "65"
+        min_payoff: "100"
+        gross_profit: "35"
+        total_net_fees: "2.19"
+        net_profit: "32.81"
+        slippage_buffer: "1"
+        fee_buffer: "0.02"
+        execution_adjusted_profit: "31.79"
+        legs:
+          - {total_premium: "30", trade_fee: "1.05", rounding_fee: "0", net_fee: "1.05", leg_cost: "31.05"}
+          - {total_premium: "35", trade_fee: "1.1375", rounding_fee: "0.0025", net_fee: "1.14", leg_cost: "36.14"}
+  one_unit:
+    relationship: {type: implication, members: [GOLD-A-GE3, GOLD-A-GE2]}
+    portfolio: {template: implication, legs: [[GOLD-A-GE3, "no"], [GOLD-A-GE2, "yes"]]}
+    observed_duration_ms: 5000
+    config: {target_quantity: "1", minimum_available_quantity: "1"}
+    expected:
+      classification: FEE_ADJUSTED_CANDIDATE
+      at_quantity:
+        quantity: "1"
+        total_premium: "0.65"
+        gross_profit: "0.35"
+        total_net_fees: "0.04"
+        net_profit: "0.31"
+        execution_adjusted_profit: "0.28"
+        legs:
+          - {trade_fee: "0.0105", rounding_fee: "0.0095", net_fee: "0.02", leg_cost: "0.32"}
+          - {trade_fee: "0.011375", rounding_fee: "0.008625", net_fee: "0.02", leg_cost: "0.37"}

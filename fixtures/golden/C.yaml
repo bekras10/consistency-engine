@@ -1,0 +1,43 @@
+# Golden fixture C — non-exhaustive outcomes (spec 15, "Test C").
+# Same three YES asks as B ($0.25 / $0.30 / $0.35) but a fourth outcome W is possible and not
+# listed: the group is mutually exclusive only. The YES basket LOOKS like a $0.10 edge but pays
+# $0 if W happens. YES bids $0.20 / $0.25 / $0.30 give NO asks $0.80 / $0.75 / $0.70.
+fixture: C
+title: Non-exhaustive outcomes
+common_settlement:
+  underlying_id: golden-c-winner
+  measurement: winner
+  location: synthetic
+  observation_window: 2026 season
+  settlement_source: Synthetic League
+  early_close_policy: none
+  exceptional_resolution: []
+events:
+  - {event_id: GOLD-C, title: "four-way, three listed", mutually_exclusive: true, outcome_set_complete: false, outcome_universe: [W, X, Y, Z]}
+markets:
+  - {id: GOLD-C-X, event_id: GOLD-C, terms: {kind: outcome, outcome_id: X}}
+  - {id: GOLD-C-Y, event_id: GOLD-C, terms: {kind: outcome, outcome_id: Y}}
+  - {id: GOLD-C-Z, event_id: GOLD-C, terms: {kind: outcome, outcome_id: Z}}
+books:
+  GOLD-C-X: {yes_bids: [["0.20", "100"]], no_bids: [["0.75", "100"]]}
+  GOLD-C-Y: {yes_bids: [["0.25", "100"]], no_bids: [["0.70", "100"]]}
+  GOLD-C-Z: {yes_bids: [["0.30", "100"]], no_bids: [["0.65", "100"]]}
+cases:
+  yes_basket_is_not_a_guarantee:
+    relationship: {type: mutually_exclusive, members: [GOLD-C-X, GOLD-C-Y, GOLD-C-Z]}
+    portfolio: {template: custom, legs: [[GOLD-C-X, "yes"], [GOLD-C-Y, "yes"], [GOLD-C-Z, "yes"]]}
+    observed_duration_ms: 5000
+    expected:
+      classification: NO_OPPORTUNITY
+      reason_codes: [NO_PRE_FEE_EDGE, NO_GUARANTEED_PAYOFF]
+      payoff_min_per_unit: "0"
+      top_of_book: {premium_per_unit: "0.90", min_payoff_per_unit: "0", pre_fee_edge_per_unit: "-0.90"}
+  no_basket:
+    relationship: {type: mutually_exclusive, members: [GOLD-C-X, GOLD-C-Y, GOLD-C-Z]}
+    portfolio: {template: no_basket, legs: [[GOLD-C-X, "no"], [GOLD-C-Y, "no"], [GOLD-C-Z, "no"]]}
+    observed_duration_ms: 5000
+    expected:
+      classification: NO_OPPORTUNITY
+      reason_codes: [NO_PRE_FEE_EDGE]
+      payoff_min_per_unit: "2"
+      top_of_book: {premium_per_unit: "2.25", min_payoff_per_unit: "2", pre_fee_edge_per_unit: "-0.25"}

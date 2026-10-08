@@ -1,0 +1,41 @@
+# Golden fixture E — fees remove profitability (spec 15, "Test E").
+# Implication; NO(A) $0.49 + YES(B) $0.49 = $0.98 for a guaranteed $1: $0.02 pre-fee edge per
+# unit, but the fictional taker fee alone is 2 x 0.05 x 0.49 x 0.51 = $0.02499 per unit.
+fixture: E
+title: Fees remove profitability
+common_settlement:
+  underlying_id: golden-e-index
+  measurement: golden index level
+  location: synthetic
+  observation_window: "2026-08-01"
+  settlement_source: Synthetic Bureau
+  methodology: published
+  unit: points
+  early_close_policy: none
+  exceptional_resolution: []
+markets:
+  - id: GOLD-E-GE3
+    terms: {kind: threshold, comparator: ">=", value: "3.0"}
+  - id: GOLD-E-GE2
+    terms: {kind: threshold, comparator: ">=", value: "2.0"}
+books:
+  GOLD-E-GE3: {yes_bids: [["0.51", "100"]]}
+  GOLD-E-GE2: {no_bids: [["0.51", "100"]]}
+cases:
+  default:
+    relationship: {type: implication, members: [GOLD-E-GE3, GOLD-E-GE2]}
+    portfolio: {template: implication, legs: [[GOLD-E-GE3, "no"], [GOLD-E-GE2, "yes"]]}
+    observed_duration_ms: 5000
+    expected:
+      classification: THEORETICAL_ONLY
+      reason_codes: [FEES_EXCEED_EDGE]
+      top_of_book: {premium_per_unit: "0.98", pre_fee_edge_per_unit: "0.02"}
+      capacity: {best_gross_quantity: "100", best_net_quantity: "10", max_profitable_quantity: null}
+      at_quantity:
+        quantity: "10"
+        gross_profit: "0.20"
+        total_net_fees: "0.26"
+        net_profit: "-0.06"
+        legs:
+          - {trade_fee: "0.12495", net_fee: "0.13"}
+          - {trade_fee: "0.12495", net_fee: "0.13"}

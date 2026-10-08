@@ -1,0 +1,35 @@
+# Golden fixture G — boundary mismatch (spec 15, "Test G").
+# "CPI >= 0.3%" settles on the published 1-dp figure (half-up); "CPI > 0.27%" settles on an
+# index-derived 2-dp figure (half-up). Naively ">= 0.3 implies > 0.27"; on the raw value it does
+# not: raw x = 0.25 reports 0.3 (YES) and 0.25 (NO).
+fixture: G
+title: Boundary mismatch
+common_settlement:
+  underlying_id: golden-g-cpi-mom
+  measurement: CPI MoM % change
+  location: synthetic
+  observation_window: "2026-08"
+  settlement_source: Synthetic Bureau of Statistics
+  unit: percent
+  early_close_policy: none
+  exceptional_resolution: []
+markets:
+  - id: GOLD-G-GE0.3
+    terms: {kind: threshold, comparator: ">=", value: "0.3"}
+    rounding: {mode: half_up, increment: "0.1"}
+    methodology: published to 1 dp
+  - id: GOLD-G-GT0.27
+    terms: {kind: threshold, comparator: ">", value: "0.27"}
+    rounding: {mode: half_up, increment: "0.01"}
+    methodology: index-derived, 2 dp
+expected:
+  false_implication:
+    type: implication
+    members: [GOLD-G-GE0.3, GOLD-G-GT0.27]
+    status: rejected
+    witness: "x=0.25"
+    raw_preimages: {GOLD-G-GE0.3: "[1/4, +inf)", GOLD-G-GT0.27: "[11/40, +inf)"}
+  converse:
+    type: implication
+    members: [GOLD-G-GT0.27, GOLD-G-GE0.3]
+    status: candidate_review

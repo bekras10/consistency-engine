@@ -24,8 +24,12 @@ Module boundaries for later milestones:
 
 - Detection pipeline (M2) consumes `consistency_connectors.ingestion.BookUpdate` from the
   bounded queue, looks up relationships through a market→relationship index, and calls
-  `consistency_core.pricing.evaluator.evaluate_relationship(...)`, which is pure and takes an
-  explicit `as_of_ms`. Certificates are already JSON-ready (`ProofCertificate.to_json()`).
+  `consistency_core.pricing.evaluator.evaluate(relationship, portfolio, markets=, books=,
+  now_ms=, fees=, config=, observed_duration_ms=)`, which is pure (explicit clock, no I/O).
+  It must track how long each strategy has continuously passed every gate except duration;
+  `tests/golden/replay_support.py` is the reference behaviour (test-only scaffolding).
+  Certificates are canonical JSON (`Evaluation.certificate_json()`, `certificate_hash`);
+  `Evaluation.to_detection(detected_at)` builds the persisted `Detection`.
 - Persistence (M2) stores `Market`, `Relationship`, `Detection`, `ProofCertificate` models as
   they are; all money fields serialise to fixed-point strings.
 - The API (M3) only reads persisted state and certificates; no business logic in `apps/`.
@@ -178,3 +182,84 @@ Module boundaries for later milestones:
   unknown, which correctly blocked verification). Bundled datasets regenerated (deterministic;
   message streams unchanged in count).
 - Tests: `tests/unit/test_relationships.py` (26), `tests/property/test_scenarios_property.py`.
+
+### Phase 6 — pricing, portfolio and fee engine ✅
+
+- **Depth walking** (`pricing/depth.py`): walks the derived ask curve level by level; reports
+  requested / available / filled / unfilled, exact premium, informational VWAP, marginal price
+  and every consumed level (each level is one fill for fee purposes).
+- **Canonical portfolios** (`pricing/portfolio.py`): implication, every ordered pair of a
+  nested chain, both equivalence directions, NO basket, and the YES basket **only** for proven
+  exhaustive groups. Stable `strategy_id` plus exact inverse `parse_strategy_id`.
+- **Payoff** (`pricing/payoff.py`): linear payoff `constant + w·s`, minimised exactly over every
+  admissible state of the relationship's scenario space; worst state and per-state payoffs in
+  the certificate.
+- **Fees** (`fees/`): two layers. Model `M·coef·C·P·(1−P)` (taker 0.07, maker 0.0175, defaults
+  1/0, no settlement fee). Rounding layer exactly as the official page: `ceil_6dp` trade fee
+  (never cents-first), `floor_precision(revenue − trade_fee)`, rounding fee remainder, per-order
+  accumulator across taker and maker fills, rebate `floor_p(min(acc, trade + rounding))`.
+  DIRECT $0.0001 / NON_DIRECT $0.01, default NON_DIRECT. Versioned schedules
+  (`fixtures/fees/kalshi-2026-07-07.yaml`, `synthetic-fictional-v1.yaml`) selected by venue and
+  timestamp; exact series match; KXMVE needs a combo classification; live-fee gate (series row,
+  effective schedule, member class, intermediary fees, revisions checked) → otherwise
+  `FEE_UNVERIFIED` with `FEE:<reason>` codes.
+- **Quantity search + thresholds** (`pricing/evaluator.py`): step = lcm of increments; domain
+  from the minimum size (or a target) to the depth-supported maximum; exhaustive up to 2000
+  points, else breakpoints ± 3 steps; gross / net / execution-adjusted profit per quantity; all
+  six spec thresholds plus fee buffer and execution role.
+- **Classification**: exactly one of the nine statuses by a fixed 10-step precedence (first
+  failing step decides), plus secondary reason codes and a pass / fail / not_reached trace.
+  Documented in `docs/mathematical-model.md` §7.
+- **Proof certificate** (`pricing/certificate.py`): deterministic canonical JSON, Decimals as
+  strings, SHA-256 hash; latency excluded from the hash.
+- **Bug found by golden I (S8), fixed**: the edge gate was tested only at the quantity that
+  maximised absolute execution-adjusted profit. A strategy profitable per unit at small size
+  but thin at depth was wrongly reported `EDGE_BELOW_MINIMUM`. The engine now maximises over the
+  edge-qualifying quantities (`edge_qualifying_points` in the certificate); regression test
+  `test_edge_gate_picks_best_qualifying_quantity`.
+- **Test-side bugs found and fixed** (none weakened an assertion): unquoted YAML dates parsed as
+  `date`; two of my hand-computed fee expectations were wrong and were re-derived (multi-level
+  total cost 2.66, not 2.16; DIRECT fractional model fee 0.04294317825 → rounding 0.000006);
+  the first replay duration tracker only sampled on leg updates, so a frozen book (S6) looked
+  0 ms old — it now also samples every 100 ms of local time.
+- **Tests**: golden A–J (`tests/golden/`), official fee goldens
+  (`tests/golden/test_fee_golden.py`), evaluator edge cases (`tests/unit/test_evaluator.py`),
+  invariants 1–10 (`tests/property/test_invariants.py`), fee properties
+  (`tests/property/test_fee_property.py`). The invariant-3 multi-fill check was first written
+  with a one-increment tolerance; a 3000-example strict probe found no counterexample, so the
+  test is strict.
+- Docs: `docs/mathematical-model.md`, `docs/compliance.md`, `docs/data-contracts.md` (fee config,
+  strategy ids, certificate, fixture format).
+
+## Deviations from the specification
+
+- **Optimizer**: no SciPy/HiGHS. Only canonical templates with integer leg ratios are priced,
+  and the quantity domain is searched exhaustively (≤ 2000 points) or at depth breakpoints. This
+  is the "independently tested simple implementation" the spec asks to preserve; a general LP
+  optimiser is deferred.
+- **Fee configuration scope**: overrides are per series (exact ticker) plus KXMVE combo class.
+  Event-level overrides and fee waivers (spec 6.5) are not modelled separately; a waiver can be
+  expressed as an M = 0 row in a new schedule version.
+- **Fee coefficients**: the coordinator's published-schedule instructions supersede the spec's
+  "consult fee_rounding" note; the PDF was not fetched (see data-contracts), so the exception
+  table is the owner's PARTIAL transcription.
+- **Test E** maps to `THEORETICAL_ONLY` exactly as the spec suggests. **Test I** additionally
+  checks every injected scenario's ground-truth label, not only replay identity.
+- **Duration**: the spec does not define how `minimum_candidate_duration_ms` is measured. We use
+  local-clock time of continuous "all gates pass except duration", sampled on leg updates and at
+  least every 100 ms (so durations have ≤ 100 ms resolution).
+- No spec number had to be changed: every golden expectation in the spec (A $0.35, B $0.10,
+  C rejected, D not 10, E/F/G/H/I/J behaviours) is asserted as written.
+
+## Known limitations (milestone 1)
+
+- No detection pipeline, persistence, API beyond health, or frontend (milestones 2–3). The
+  Test I scan loop lives in `tests/golden/replay_support.py` and is not production code.
+- Breakpoint search can miss sub-cent rounding optima and, with the edge gate, may report a
+  smaller qualifying quantity than the true constrained optimum (conservative). Exhaustive
+  search is used for all bundled fixtures.
+- Real-venue fees are always `FEE_UNVERIFIED` in practice until member class, intermediary fees
+  and schedule revisions are confirmed; the exception table is PARTIAL; the rebate-cap rule is
+  an interpretation (mathematical-model §5.3).
+- Synthetic results support no empirical claim about real markets (docs/compliance.md).
+- Execution is never atomic across markets; certificates say so.

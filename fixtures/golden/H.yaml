@@ -1,0 +1,47 @@
+# Golden fixture H — recovery (spec 15, "Test H").
+# One subscription (sid 1) carries both legs of fixture A's implication. Sequence 4 is lost.
+# The books must become UNSYNCHRONIZED, no verified opportunity may be emitted while they are,
+# deltas after the gap must be ignored, and evaluation resumes after fresh snapshots (sid 2).
+fixture: H
+title: Recovery after a sequence gap
+common_settlement:
+  underlying_id: golden-h-index
+  measurement: golden index level
+  location: synthetic
+  observation_window: "2026-08-01"
+  settlement_source: Synthetic Bureau
+  methodology: published
+  unit: points
+  early_close_policy: none
+  exceptional_resolution: []
+markets:
+  - id: GOLD-H-GE3
+    terms: {kind: threshold, comparator: ">=", value: "3.0"}
+  - id: GOLD-H-GE2
+    terms: {kind: threshold, comparator: ">=", value: "2.0"}
+relationship: {type: implication, members: [GOLD-H-GE3, GOLD-H-GE2]}
+portfolio: {template: implication, legs: [[GOLD-H-GE3, "no"], [GOLD-H-GE2, "yes"]]}
+steps:
+  - msg: {type: snapshot, market: GOLD-H-GE3, sid: "1", seq: 1, yes_bids: [["0.70", "100"]]}
+    expect_sync: {GOLD-H-GE3: synchronized, GOLD-H-GE2: awaiting_snapshot}
+    expect_classification: UNSYNCHRONIZED_DATA
+  - msg: {type: snapshot, market: GOLD-H-GE2, sid: "1", seq: 2, no_bids: [["0.65", "100"]]}
+    expect_sync: {GOLD-H-GE3: synchronized, GOLD-H-GE2: synchronized}
+    expect_classification: FEE_ADJUSTED_CANDIDATE
+  - msg: {type: delta, market: GOLD-H-GE3, sid: "1", seq: 3, side: "yes", price: "0.70", delta: "-50"}
+    expect_sync: {GOLD-H-GE3: synchronized, GOLD-H-GE2: synchronized}
+    expect_classification: FEE_ADJUSTED_CANDIDATE
+  - msg: {type: delta, market: GOLD-H-GE2, sid: "1", seq: 5, side: "no", price: "0.65", delta: "50"}
+    expect_sync: {GOLD-H-GE3: unsynchronized, GOLD-H-GE2: unsynchronized}
+    expect_classification: UNSYNCHRONIZED_DATA
+  - msg: {type: delta, market: GOLD-H-GE3, sid: "1", seq: 6, side: "yes", price: "0.70", delta: "500"}
+    expect_sync: {GOLD-H-GE3: unsynchronized, GOLD-H-GE2: unsynchronized}
+    expect_classification: UNSYNCHRONIZED_DATA
+    expect_yes_bids: {GOLD-H-GE3: [["0.70", "50"]]}
+  - msg: {type: snapshot, market: GOLD-H-GE3, sid: "2", seq: 1, yes_bids: [["0.70", "40"]]}
+    expect_sync: {GOLD-H-GE3: synchronized, GOLD-H-GE2: unsynchronized}
+    expect_classification: UNSYNCHRONIZED_DATA
+  - msg: {type: snapshot, market: GOLD-H-GE2, sid: "2", seq: 2, no_bids: [["0.65", "40"]]}
+    expect_sync: {GOLD-H-GE3: synchronized, GOLD-H-GE2: synchronized}
+    expect_classification: FEE_ADJUSTED_CANDIDATE
+    expect_max_supported: "40"

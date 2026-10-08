@@ -1,0 +1,48 @@
+# Golden fixture J — fractional precision (spec 15, "Test J").
+# Fractional quantities (increment 0.01) and 4-dp prices: NO(A) ask $0.3333 x 3.33 (YES bid on A
+# at $0.6667), YES(B) ask $0.4444 x 5.55 (NO bid on B at $0.5556). Evaluate exactly 3.33 baskets.
+fixture: J
+title: Fractional precision
+common_settlement:
+  underlying_id: golden-j-index
+  measurement: golden index level
+  location: synthetic
+  observation_window: "2026-08-01"
+  settlement_source: Synthetic Bureau
+  methodology: published
+  unit: points
+  early_close_policy: none
+  exceptional_resolution: []
+markets:
+  - id: GOLD-J-GE3
+    quantity_increment: "0.01"
+    terms: {kind: threshold, comparator: ">=", value: "3.0"}
+  - id: GOLD-J-GE2
+    quantity_increment: "0.01"
+    terms: {kind: threshold, comparator: ">=", value: "2.0"}
+books:
+  GOLD-J-GE3: {yes_bids: [["0.6667", "3.33"]]}
+  GOLD-J-GE2: {no_bids: [["0.5556", "5.55"]]}
+cases:
+  default:
+    relationship: {type: implication, members: [GOLD-J-GE3, GOLD-J-GE2]}
+    portfolio: {template: implication, legs: [[GOLD-J-GE3, "no"], [GOLD-J-GE2, "yes"]]}
+    observed_duration_ms: 5000
+    config: {target_quantity: "3.33"}
+    expected:
+      classification: FEE_ADJUSTED_CANDIDATE
+      capacity: {quantity_step: "0.01", max_supported_quantity: "3.33"}
+      at_quantity:
+        quantity: "3.33"
+        total_premium: "2.589741"
+        gross_profit: "0.740259"
+        total_net_fees: "0.090259"
+        total_cost: "2.68"
+        net_profit: "0.65"
+        slippage_buffer: "0.0333"
+        fee_buffer: "0.02"
+        execution_adjusted_profit: "0.5967"
+        per_unit_net: "0.19519519"
+        legs:
+          - {total_premium: "1.109889", trade_fee: "0.036999", rounding_fee: "0.003112", rebate: "0", net_fee: "0.040111", leg_cost: "1.15"}
+          - {total_premium: "1.479852", trade_fee: "0.041111", rounding_fee: "0.009037", rebate: "0", net_fee: "0.050148", leg_cost: "1.53"}

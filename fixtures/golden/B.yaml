@@ -1,0 +1,53 @@
+# Golden fixture B — exhaustive three-outcome basket (spec 15, "Test B").
+# Categorical event with a complete listed outcome set; YES asks $0.25 / $0.30 / $0.35
+# (NO bids at $0.75 / $0.70 / $0.65), 100 contracts each.
+fixture: B
+title: Exhaustive three-outcome basket
+common_settlement:
+  underlying_id: golden-b-winner
+  measurement: winner
+  location: synthetic
+  observation_window: 2026 season
+  settlement_source: Synthetic League
+  early_close_policy: none
+  exceptional_resolution: []
+events:
+  - {event_id: GOLD-B, title: "three-way", mutually_exclusive: true, outcome_set_complete: true, outcome_universe: [X, Y, Z]}
+markets:
+  - {id: GOLD-B-X, event_id: GOLD-B, terms: {kind: outcome, outcome_id: X}}
+  - {id: GOLD-B-Y, event_id: GOLD-B, terms: {kind: outcome, outcome_id: Y}}
+  - {id: GOLD-B-Z, event_id: GOLD-B, terms: {kind: outcome, outcome_id: Z}}
+books:
+  GOLD-B-X: {no_bids: [["0.75", "100"]]}
+  GOLD-B-Y: {no_bids: [["0.70", "100"]]}
+  GOLD-B-Z: {no_bids: [["0.65", "100"]]}
+cases:
+  yes_basket:
+    relationship: {type: exhaustive_partition, members: [GOLD-B-X, GOLD-B-Y, GOLD-B-Z]}
+    portfolio: {template: yes_basket, legs: [[GOLD-B-X, "yes"], [GOLD-B-Y, "yes"], [GOLD-B-Z, "yes"]]}
+    observed_duration_ms: 5000
+    expected:
+      classification: FEE_ADJUSTED_CANDIDATE
+      payoff_min_per_unit: "1"
+      top_of_book: {premium_per_unit: "0.90", min_payoff_per_unit: "1", pre_fee_edge_per_unit: "0.10"}
+      capacity: {max_supported_quantity: "100", best_execution_quantity: "100"}
+      at_quantity:
+        quantity: "100"
+        total_premium: "90"
+        gross_profit: "10"
+        total_net_fees: "3.13"
+        net_profit: "6.87"
+        slippage_buffer: "1.5"
+        fee_buffer: "0.03"
+        execution_adjusted_profit: "5.34"
+        legs:
+          - {trade_fee: "0.9375", net_fee: "0.94"}
+          - {trade_fee: "1.05", net_fee: "1.05"}
+          - {trade_fee: "1.1375", net_fee: "1.14"}
+  no_basket_without_yes_bids:
+    relationship: {type: exhaustive_partition, members: [GOLD-B-X, GOLD-B-Y, GOLD-B-Z]}
+    portfolio: {template: no_basket, legs: [[GOLD-B-X, "no"], [GOLD-B-Y, "no"], [GOLD-B-Z, "no"]]}
+    observed_duration_ms: 5000
+    expected:
+      classification: INSUFFICIENT_LIQUIDITY
+      reason_codes: [NO_ASKS]

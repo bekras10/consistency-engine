@@ -1,0 +1,24 @@
+# FICTIONAL fee schedule for the synthetic exchange. It is NOT Kalshi's schedule and must never
+# be used for real markets. It deliberately differs from the published coefficients so that
+# synthetic results cannot be mistaken for real fee calculations, but it routes through exactly
+# the same model and rounding code (layer a + layer b, per-order accumulator).
+schedule_id: synthetic-fictional-v1
+venue: synthetic
+label: "SYNTHETIC-FICTIONAL fee schedule v1 (not a real exchange schedule)"
+effective_from: "2020-01-01T00:00:00Z"
+effective_to: null
+source_urls: []
+taker_coefficient: "0.05"
+maker_coefficient: "0.0125"
+default_taker_multiplier: "1"
+default_maker_multiplier: "0"
+settlement_fee: "0"
+completeness: COMPLETE
+verification_status: FICTIONAL
+unlisted_series: default_multipliers
+default_member_class: non_direct
+combo_series: []
+exceptions: []
+notes:
+  - "Verified by construction: every synthetic series uses the default multipliers."
+  - "Synthetic participants are NON_DIRECT ($0.01 balance precision)."

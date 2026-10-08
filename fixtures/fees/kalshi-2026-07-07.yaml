@@ -1,0 +1,46 @@
+# Kalshi event-contract fee schedule, effective 2026-07-07 (UTC).
+# Source of every number below: owner transcription in
+#   docs/sources/kalshi-fee-schedule-2026-07-07.md  (PDF not committed)
+#   docs/sources/kalshi-fee-rounding-2026-10-08.md  (rounding layer, implemented in code)
+# verification_status covers the formulas and the LISTED rows only. The exception table is
+# PARTIAL: unlisted series resolve to FEE_UNVERIFIED (never silently to the defaults).
+# Before enabling any authorized live integration, re-check https://kalshi.com/fee-schedule for
+# later revisions and add a new schedule file with its own effective_from.
+schedule_id: kalshi-2026-07-07
+venue: kalshi
+label: "Kalshi event contracts (published schedule effective 2026-07-07)"
+effective_from: "2026-07-07T00:00:00Z"
+effective_to: null
+source_urls:
+  - https://kalshi.com/docs/kalshi-fee-schedule.pdf
+  - https://kalshi.com/fee-schedule
+  - https://docs.kalshi.com/getting_started/fee_rounding
+taker_coefficient: "0.07"
+maker_coefficient: "0.0175"
+default_taker_multiplier: "1"
+default_maker_multiplier: "0"
+settlement_fee: "0"
+completeness: PARTIAL
+verification_status: VERIFIED_AGAINST_PUBLISHED_SCHEDULE
+unlisted_series: unverified
+default_member_class: null
+combo_series: [KXMVE]
+exceptions:
+  - {series: KXCPI, maker_multiplier: "1", taker_multiplier: "1"}
+  - {series: KXFED, maker_multiplier: "1", taker_multiplier: "1"}
+  - {series: KXMLBGAME, maker_multiplier: "1", taker_multiplier: "1"}
+  - {series: KXNFLGAME, maker_multiplier: "1", taker_multiplier: "1"}
+  - {series: KXBALLONDOR, maker_multiplier: "1", taker_multiplier: "1"}
+  - {series: KXBTCY, maker_multiplier: "0", taker_multiplier: "0"}
+  - {series: KXETHY, maker_multiplier: "0", taker_multiplier: "0"}
+  - {series: KXDOED, maker_multiplier: "0", taker_multiplier: "0"}
+  - series: KXMVE
+    combo_classification: specified
+    maker_multiplier: "2"
+    taker_multiplier: "1"
+    note: >-
+      Applies to the specified combos only. The PDF also excludes uncorrelated NFL combos with
+      wording that was not transcribed; any other or unknown combo class is FEE_UNVERIFIED.
+notes:
+  - "Perpetual-futures fees use a separate tiered structure and are outside this engine."
+  - "Member classification and FCM/intermediary fees are account-specific and must be supplied."

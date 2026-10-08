@@ -1,0 +1,55 @@
+# Golden fixture D — insufficient depth (spec 15, "Test D").
+# Implication as in A, but YES(B) has only 3 contracts displayed while NO(A) has 100.
+# A 10-contract basket is requested.
+fixture: D
+title: Insufficient depth
+common_settlement:
+  underlying_id: golden-d-index
+  measurement: golden index level
+  location: synthetic
+  observation_window: "2026-08-01"
+  settlement_source: Synthetic Bureau
+  methodology: published
+  unit: points
+  early_close_policy: none
+  exceptional_resolution: []
+markets:
+  - id: GOLD-D-GE3
+    terms: {kind: threshold, comparator: ">=", value: "3.0"}
+  - id: GOLD-D-GE2
+    terms: {kind: threshold, comparator: ">=", value: "2.0"}
+books:
+  GOLD-D-GE3: {yes_bids: [["0.70", "100"]]}
+  GOLD-D-GE2: {no_bids: [["0.65", "3"]]}
+cases:
+  ten_requested:
+    relationship: {type: implication, members: [GOLD-D-GE3, GOLD-D-GE2]}
+    portfolio: {template: implication, legs: [[GOLD-D-GE3, "no"], [GOLD-D-GE2, "yes"]]}
+    observed_duration_ms: 5000
+    config: {target_quantity: "10"}
+    expected:
+      classification: INSUFFICIENT_LIQUIDITY
+      reason_codes: [DEPTH_BELOW_MINIMUM]
+      capacity: {max_supported_quantity: "3", domain_lower: "10"}
+      at_quantity:
+        quantity: "10"
+        fully_filled: false
+        legs:
+          - {filled_quantity: "10", unfilled_quantity: "0", available_quantity: "100"}
+          - {filled_quantity: "3", unfilled_quantity: "7", available_quantity: "3"}
+  small_size_allowed:
+    relationship: {type: implication, members: [GOLD-D-GE3, GOLD-D-GE2]}
+    portfolio: {template: implication, legs: [[GOLD-D-GE3, "no"], [GOLD-D-GE2, "yes"]]}
+    observed_duration_ms: 5000
+    config: {minimum_available_quantity: "1"}
+    expected:
+      classification: FEE_ADJUSTED_CANDIDATE
+      capacity: {max_supported_quantity: "3", best_execution_quantity: "3"}
+      at_quantity:
+        quantity: "3"
+        fully_filled: true
+        total_premium: "1.95"
+        gross_profit: "1.05"
+        total_net_fees: "0.08"
+        net_profit: "0.97"
+        execution_adjusted_profit: "0.92"

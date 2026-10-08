@@ -1,0 +1,10 @@
+# Golden fixture I — replay consistency (spec 15, "Test I").
+# Replaying the bundled `inconsistent` dataset twice through ingestion + discovery + evaluation
+# must produce byte-identical detection output (certificate hashes), and every injected scenario
+# must be classified as its ground-truth label says.
+fixture: I
+title: Replay consistency
+dataset: inconsistent
+reviews: fixtures/relationships/manual-reviews.yaml
+expect_identical_runs: 2
+expected_from: dataset metadata (expected_findings)

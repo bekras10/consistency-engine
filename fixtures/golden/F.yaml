@@ -1,0 +1,43 @@
+# Golden fixture F — stale books (spec 15, "Test F").
+# The profitable B basket, but every book was last confirmed 5 s ago (limit 2 s); and a variant
+# where books are individually fresh but 700 ms apart (skew limit 500 ms).
+fixture: F
+title: Stale books
+common_settlement:
+  underlying_id: golden-f-winner
+  measurement: winner
+  location: synthetic
+  observation_window: 2026 season
+  settlement_source: Synthetic League
+  early_close_policy: none
+  exceptional_resolution: []
+events:
+  - {event_id: GOLD-F, title: "three-way", mutually_exclusive: true, outcome_set_complete: true, outcome_universe: [X, Y, Z]}
+markets:
+  - {id: GOLD-F-X, event_id: GOLD-F, terms: {kind: outcome, outcome_id: X}}
+  - {id: GOLD-F-Y, event_id: GOLD-F, terms: {kind: outcome, outcome_id: Y}}
+  - {id: GOLD-F-Z, event_id: GOLD-F, terms: {kind: outcome, outcome_id: Z}}
+books:
+  GOLD-F-X: {no_bids: [["0.75", "100"]], age_ms: 5000}
+  GOLD-F-Y: {no_bids: [["0.70", "100"]], age_ms: 5000}
+  GOLD-F-Z: {no_bids: [["0.65", "100"]], age_ms: 5000}
+skewed_books:
+  GOLD-F-X: {no_bids: [["0.75", "100"]], age_ms: 100}
+  GOLD-F-Y: {no_bids: [["0.70", "100"]], age_ms: 800}
+  GOLD-F-Z: {no_bids: [["0.65", "100"]], age_ms: 300}
+cases:
+  stale:
+    relationship: {type: exhaustive_partition, members: [GOLD-F-X, GOLD-F-Y, GOLD-F-Z]}
+    portfolio: {template: yes_basket, legs: [[GOLD-F-X, "yes"], [GOLD-F-Y, "yes"], [GOLD-F-Z, "yes"]]}
+    observed_duration_ms: 5000
+    expected:
+      classification: STALE_DATA
+      reason_codes: [BOOK_TOO_OLD]
+  skewed:
+    use_books: skewed_books
+    relationship: {type: exhaustive_partition, members: [GOLD-F-X, GOLD-F-Y, GOLD-F-Z]}
+    portfolio: {template: yes_basket, legs: [[GOLD-F-X, "yes"], [GOLD-F-Y, "yes"], [GOLD-F-Z, "yes"]]}
+    observed_duration_ms: 5000
+    expected:
+      classification: STALE_DATA
+      reason_codes: [CROSS_MARKET_SKEW]

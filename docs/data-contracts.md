@@ -93,3 +93,53 @@ exclusion wording), and schedule revisions after 2026-07-07.
 
 The synthetic exchange uses a **fictional** schedule (`fixtures/fees/synthetic-fictional-v1.yaml`)
 routed through the same rounding layer.
+
+## Fee schedule configuration (`fixtures/fees/*.yaml`)
+
+One file per schedule version, loaded by `FeeScheduleRegistry.from_directory`. Fields:
+`schedule_id`, `venue` (`kalshi` | `synthetic`), `label`, `effective_from` / `effective_to`
+(UTC; `null` = open-ended; versions of one venue may not overlap), `source_urls`,
+`taker_coefficient`, `maker_coefficient`, `default_taker_multiplier`,
+`default_maker_multiplier`, `settlement_fee` (0), `exceptions` (rows of `series`,
+`maker_multiplier`, `taker_multiplier`, optional `combo_classification`, `note`),
+`combo_series` (series that need a combo classification, e.g. `KXMVE`), `completeness`
+(`COMPLETE` | `PARTIAL`), `verification_status` (`VERIFIED_AGAINST_PUBLISHED_SCHEDULE` |
+`FICTIONAL` | `UNVERIFIED`), `unlisted_series` (`default_multipliers` | `unverified`; a PARTIAL
+schedule must use `unverified`), `default_member_class`, `notes`.
+
+| File | Venue | Effective | Status |
+|---|---|---|---|
+| `kalshi-2026-07-07.yaml` | kalshi | 2026-07-07T00:00Z → open | VERIFIED_AGAINST_PUBLISHED_SCHEDULE (formulas + listed rows only), PARTIAL |
+| `synthetic-fictional-v1.yaml` | synthetic | 2020-01-01 → open | FICTIONAL, COMPLETE |
+
+Series matching is exact string equality on the series ticker.
+
+## Strategy identifiers
+
+`<template>|<SIDE>:<market_id>[x<ratio>],...` — e.g.
+`implication|NO:SYNCPI-26AUG-GE0.3,YES:SYNCPI-26AUG-GE0.2`. Legs keep portfolio order; a ratio
+suffix appears only when ≠ 1. `parse_strategy_id` is the exact inverse and rejects
+non-canonical ids.
+
+## Proof certificate (`proof-certificate/1`)
+
+Canonical JSON: sorted keys, UTF-8, no JSON numbers for money (every Decimal is a fixed-point
+string; integers such as timestamps and counts are JSON integers), no floats anywhere. Top-level
+keys: `books`, `capacity`, `certificate_version`, `classification`, `config`, `engine_version`,
+`evaluation`, `fee_schedule_ids`, `fees`, `fictional_fees`, `notes`, `payoff`, `portfolio`,
+`reason_codes`, `relationship`, `timing`, `top_of_book`, `trace`. Sections that a failing step
+never reached are `null`. Per-fill fee records carry `fill_index`, `role`, `price`,
+`quantity`, `revenue`, `model_fee`, `trade_fee`, `aligned_change`, `rounding_fee`,
+`accumulator_before`, `rebate`, `accumulator_after`, `net_fee`, `balance_change`; order totals
+add `total_*`, `accumulator_remaining`, `member_class`, `precision`. The certificate hash is
+`sha256:` + hex SHA-256 of that JSON; `processing_latency_ns` is reported outside the hash.
+Field semantics are in [mathematical-model.md](mathematical-model.md#8-proof-certificate).
+
+## Golden fixture files (`fixtures/golden/<A-J>.yaml`)
+
+`common_settlement` (shared `SettlementSpec` fields), `events`, `markets` (`id`, `terms`,
+optional `rounding`, `methodology`, `quantity_increment`, `event_id`, `series_id`), `books`
+(per market `yes_bids` / `no_bids` as `[price, qty]` strings, `age_ms`, optional `sync`), and
+`cases` with `relationship`, `portfolio`, `config` (an `EvaluationConfig` override),
+`observed_duration_ms`, and `expected` values compared by exact Decimal equality. Dates in
+YAML must be quoted strings (unquoted `2026-08-01` parses as a date).

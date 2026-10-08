@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
+from decimal import Decimal
 from enum import StrEnum
 
 from consistency_core.models.common import FrozenModel, Side
@@ -45,6 +47,24 @@ def strategy_id(template: Template, legs: Sequence[Leg]) -> str:
         suffix = "" if leg.ratio == ONE else f"x{leg.ratio}"
         parts.append(f"{leg.side.value.upper()}:{leg.market_id}{suffix}")
     return f"{template.value}|{','.join(parts)}"
+
+
+def parse_strategy_id(value: str) -> Portfolio:
+    """Inverse of :func:`strategy_id`."""
+    template, _, body = value.partition("|")
+    legs = []
+    for part in body.split(","):
+        side, _, rest = part.partition(":")
+        m = _RATIO.match(rest)
+        market_id, ratio = (m.group(1), m.group(2)) if m else (rest, "1")
+        legs.append(Leg(market_id=market_id, side=Side(side.lower()), ratio=Decimal(ratio)))
+    pf = Portfolio(template=Template(template), legs=tuple(legs))
+    if pf.strategy_id != value:
+        raise ValueError(f"not a canonical strategy id: {value!r}")
+    return pf
+
+
+_RATIO = re.compile(r"^(.+)x(\d+(?:\.\d+)?)$")
 
 
 def _yes(m: str) -> Leg:
