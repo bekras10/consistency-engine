@@ -22,6 +22,8 @@ help:
 
 setup:
 	$(UV) sync
+	@# macOS can mark editable-install .pth files hidden; Python >= 3.12.10 then ignores them.
+	@-chflags nohidden .venv/lib/python3.12/site-packages/*.pth 2>/dev/null || true
 
 test:
 	$(PYTEST)

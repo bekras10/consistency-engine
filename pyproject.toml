@@ -53,10 +53,10 @@ extend-exclude = ["apps/web", ".uv-cache"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "N", "SIM", "RUF", "C4", "PT", "TID", "FLY", "PIE"]
-ignore = ["RUF001", "RUF002", "RUF003"]
+ignore = ["RUF001", "RUF002", "RUF003", "PT018"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["N802", "N806"]
+"tests/**" = ["N802", "N806", "E501"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "math.fsum".msg = "Money arithmetic must use Decimal; see AGENTS.md."
@@ -92,6 +92,16 @@ warn_required_dynamic_aliases = true
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
+# Explicit source roots: macOS may flag uv's editable .pth files as hidden, and Python >= 3.12.10
+# skips hidden .pth files. Listing the roots keeps the test run independent of that.
+pythonpath = [
+    ".",
+    "packages/core/src",
+    "packages/simulation/src",
+    "packages/connectors/src",
+    "apps/api/src",
+    "apps/worker/src",
+]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 addopts = "-ra --strict-markers"

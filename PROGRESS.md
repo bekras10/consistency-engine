@@ -48,3 +48,28 @@ Module boundaries for later milestones:
   print "not yet implemented — milestone N" and **exit 2** (no faked success).
 - Decision: starlette 1.x emits a deprecation warning for the httpx-backed `TestClient`; it is
   filtered by message in pytest config (all other warnings are errors).
+- Environment quirk: macOS flags uv's editable `.pth` files as hidden and Python 3.12.11 skips
+  hidden `.pth` files. pytest therefore uses explicit `pythonpath`; `make setup` clears the flag.
+
+### Phase 2 — domain models + fixed-point normalization ✅
+
+- **Model technology decision: Pydantic v2 frozen models** (`extra="forbid"`). Reason: one
+  declaration gives validation, immutability, and JSON schema for the later API; the custom
+  `Dec` annotated type refuses floats/bools on input and serialises fixed-point strings.
+- `consistency_core.money`: `dec()` (no floats), exact `ceil_to`/`floor_to`/`is_multiple`,
+  `dec_str` (never exponent notation). Default decimal context is sufficient (documented why).
+- `consistency_core.ticks`: `PriceGrid` of `TickRange(start, end, step)`; parsing from
+  `price_ranges`, `tick_size_dollars`, legacy `tick_size`; off-grid prices are errors, never
+  snapped.
+- Models: `Series`, `Event` (with `mutually_exclusive` / `outcome_set_complete` evidence),
+  `Market` (all spec fields + structured `SettlementSpec` + rules hash), `MarketRules`,
+  `PriceLevel`, `AskLevel`, `OrderBook` (sync/health metadata, ms timestamps), `Relationship`
+  (+ `ScenarioSpec`, `EvidenceCheck`, `ReviewRecord`), `Detection`, `Classification`.
+- Binary book: ask curves derived only from opposing bids (high→low → complement →
+  cheapest-first), zero-quantity levels dropped, crossed/locked books rejected.
+- Normalization (`consistency_core.normalization`): strict literal parsers, REST (fixed-point
+  and legacy-cent shapes) and WS snapshot/delta parsing via a single `FieldMap`.
+- Docs: Kalshi docs pages could not be fetched (fee_rounding hung for ~15 min and was
+  abandoned; others skipped per coordinator instruction). Field names are flagged
+  **unverified** in docs/data-contracts.md. The owner later supplied the fee-rounding page and a
+  fee-schedule transcription (saved under `docs/sources/`).
