@@ -116,6 +116,19 @@ class _MarketState:
         return self.yes if side is Side.YES else self.no
 
 
+type _SubKey = tuple[str, str]  # (connection_id, sid)
+
+
+def _key_str(key: _SubKey) -> str:
+    return f"{key[0]}/{key[1]}"
+
+
+def _market_key(st: _MarketState) -> _SubKey | None:
+    if st.connection_id is None or st.sid is None:
+        return None
+    return (st.connection_id, st.sid)
+
+
 @dataclass
 class _Subscription:
     sid: str
@@ -156,7 +169,9 @@ class BookManager:
         self._markets: dict[str, _MarketState] = {
             m.market_id: _MarketState(market=m, status=m.status) for m in markets
         }
-        self._subs: dict[str, _Subscription] = {}
+        self._subs: dict[_SubKey, _Subscription] = {}
+        """Keyed by (connection_id, sid): sids are only unique within one connection, so
+        sequence history, gap/duplicate detection and malformed-message recovery are per key."""
         self._confirmed: dict[str, int] = {}
         self._recovery: dict[str | None, dict[str, str]] = {}
         self.stats = ManagerStats()
@@ -237,8 +252,8 @@ class BookManager:
                 for mid, st in sorted(self._markets.items())
             },
             "subscriptions": {
-                sid: {"last_seq": s.last_seq, "markets": sorted(s.markets)}
-                for sid, s in sorted(self._subs.items())
+                _key_str(key): {"last_seq": s.last_seq, "markets": sorted(s.markets)}
+                for key, s in sorted(self._subs.items())
             },
             "confirmed": dict(sorted(self._confirmed.items())),
             "stats": self.stats.as_dict(),
@@ -292,11 +307,11 @@ class BookManager:
         """All books on the connection become untrusted (also used by heartbeat timeouts)."""
         self.stats.connection_losses += 1
         out: list[tuple[str, str, str]] = []
-        for sid in [s for s, sub in self._subs.items() if sub.connection_id == connection_id]:
-            for mid in sorted(self._subs[sid].markets):
+        for key in sorted(k for k in self._subs if k[0] == connection_id):
+            for mid in sorted(self._subs[key].markets):
                 if self._desync(mid, reason, connection_id):
                     out.append((mid, "desync", reason))
-            del self._subs[sid]
+            del self._subs[key]
         self._confirmed.pop(connection_id, None)
         return out
 
@@ -323,21 +338,19 @@ class BookManager:
         self.stats.desync_events += 1
         return True
 
-    def _desync_sid(self, sid: str, reason: str) -> list[tuple[str, str, str | None]]:
-        sub = self._subs[sid]
+    def _desync_sub(self, key: _SubKey, reason: str) -> list[tuple[str, str, str | None]]:
+        sub = self._subs[key]
         return [
             (mid, "desync", reason)
             for mid in sorted(sub.markets)
             if self._desync(mid, reason, sub.connection_id)
         ]
 
-    def _check_seq(
-        self, sid: str, seq: int, connection_id: str
-    ) -> tuple[str, list[tuple[str, str, str | None]]]:
+    def _check_seq(self, key: _SubKey, seq: int) -> tuple[str, list[tuple[str, str, str | None]]]:
         """Returns ("new" | "ok" | "dup" | "gap", desync updates)."""
-        sub = self._subs.get(sid)
+        sub = self._subs.get(key)
         if sub is None:
-            self._subs[sid] = _Subscription(sid=sid, connection_id=connection_id, last_seq=seq)
+            self._subs[key] = _Subscription(sid=key[1], connection_id=key[0], last_seq=seq)
             return "new", []
         if seq <= sub.last_seq:
             return "dup", []
@@ -346,12 +359,13 @@ class BookManager:
             return "ok", []
         self.stats.gaps_detected += 1
         sub.last_seq = seq
-        return "gap", self._desync_sid(sid, DesyncReason.SEQUENCE_GAP)
+        return "gap", self._desync_sub(key, DesyncReason.SEQUENCE_GAP)
 
     def _on_snapshot(
         self, msg: StreamMessage, ev: OrderBookSnapshotEvent
     ) -> list[tuple[str, str, str | None]]:
-        verdict, out = self._check_seq(ev.sid, ev.seq, ev.connection_id)
+        key = (ev.connection_id, ev.sid)
+        verdict, out = self._check_seq(key, ev.seq)
         if verdict == "dup":
             self.stats.duplicates_dropped += 1
             return out
@@ -371,9 +385,10 @@ class BookManager:
             if self._desync(ev.market_id, reason, ev.connection_id):
                 out.append((ev.market_id, "desync", f"{reason}:{_code(exc)}"))
             return out
-        if st.sid is not None and st.sid in self._subs and st.sid != ev.sid:
-            self._subs[st.sid].markets.discard(ev.market_id)
-        self._subs[ev.sid].markets.add(ev.market_id)
+        old = _market_key(st)
+        if old is not None and old in self._subs and old != key:
+            self._subs[old].markets.discard(ev.market_id)
+        self._subs[key].markets.add(ev.market_id)
         st.sid = ev.sid
         st.connection_id = ev.connection_id
         st.yes = {lv.price: lv.quantity for lv in yes}
@@ -392,10 +407,11 @@ class BookManager:
     def _on_delta(
         self, msg: StreamMessage, ev: OrderBookDeltaEvent
     ) -> list[tuple[str, str, str | None]]:
-        if ev.sid not in self._subs:
+        key = (ev.connection_id, ev.sid)
+        if key not in self._subs:
             self.stats.ignored_stale_subscription += 1
             return []
-        verdict, out = self._check_seq(ev.sid, ev.seq, ev.connection_id)
+        verdict, out = self._check_seq(key, ev.seq)
         if verdict == "dup":
             self.stats.duplicates_dropped += 1
             return out
@@ -405,7 +421,7 @@ class BookManager:
         if st is None:
             self.stats.ignored_unknown_market += 1
             return out
-        if st.sid != ev.sid:
+        if _market_key(st) != key:
             self.stats.ignored_stale_subscription += 1
             return out
         if st.sync is not SyncStatus.SYNCHRONIZED:
@@ -450,15 +466,16 @@ class BookManager:
         payload = msg.event.payload
         sid_raw, seq_raw = payload.get("sid"), payload.get("seq")
         reason = f"{DesyncReason.MALFORMED_MESSAGE}:{exc.code.value}"
+        key = (conn, str(sid_raw)) if conn is not None else None
         if (
-            isinstance(sid_raw, int)
+            key is not None
+            and isinstance(sid_raw, int)
             and not isinstance(sid_raw, bool)
-            and str(sid_raw) in self._subs
+            and key in self._subs
         ):
-            sid = str(sid_raw)
             if isinstance(seq_raw, int) and not isinstance(seq_raw, bool):
-                self._subs[sid].last_seq = max(self._subs[sid].last_seq, seq_raw)
-            return self._desync_sid(sid, reason)
+                self._subs[key].last_seq = max(self._subs[key].last_seq, seq_raw)
+            return self._desync_sub(key, reason)
         if conn is not None:
             return list(self.mark_connection_lost(conn, reason))
         return []
@@ -473,8 +490,9 @@ class BookManager:
         st = self._markets.pop(ev.market_id, None)
         if st is None:
             return []
-        if st.sid in self._subs:
-            self._subs[st.sid].markets.discard(ev.market_id)
+        old = _market_key(st)
+        if old is not None and old in self._subs:
+            self._subs[old].markets.discard(ev.market_id)
         for pending in self._recovery.values():
             pending.pop(ev.market_id, None)
         return [(ev.market_id, "removed", "removed")]
