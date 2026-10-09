@@ -27,10 +27,12 @@ Timing telemetry (``perf_counter_ns``) is recorded on each update but excluded f
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from decimal import Decimal
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -55,7 +57,7 @@ from consistency_core.models.orderbook import (
 )
 from consistency_core.money import ONE, ZERO, dec_str
 from consistency_core.normalization import normalize_ws_message, validate_side
-from consistency_core.serialization import sha256_of
+from consistency_core.serialization import canonical_json, sha256_of
 
 
 class DesyncReason:
@@ -277,6 +279,76 @@ class BookManager:
             "confirmed": dict(sorted(self._confirmed.items())),
             "stats": self.stats.as_dict(),
         }
+
+    # ------------------------------------------------------------------ checkpoints
+    def export_state(self) -> dict[str, Any]:
+        """Complete, JSON-serialisable state (checkpoints). :meth:`from_state` restores a
+        manager whose future behaviour is identical; timing telemetry is not part of it."""
+        return {
+            "source": self.source,
+            "max_future_ms": self.max_future_ms,
+            "markets": [
+                {
+                    "market": json.loads(canonical_json(st.market)),
+                    "status": st.status.value,
+                    "sync": st.sync.value,
+                    "reason": st.reason,
+                    "sid": st.sid,
+                    "connection_id": st.connection_id,
+                    "yes": [[dec_str(p), dec_str(q)] for p, q in sorted(st.yes.items())],
+                    "no": [[dec_str(p), dec_str(q)] for p, q in sorted(st.no.items())],
+                    "last_seq": st.last_seq,
+                    "exchange_ts_ms": st.exchange_ts_ms,
+                    "received_ts_ms": st.received_ts_ms,
+                    "last_sync_ts_ms": st.last_sync_ts_ms,
+                }
+                for _, st in sorted(self._markets.items())
+            ],
+            "subscriptions": [
+                [key[0], key[1], s.last_seq, sorted(s.markets)]
+                for key, s in sorted(self._subs.items())
+            ],
+            "confirmed": dict(sorted(self._confirmed.items())),
+            "recovery": [
+                [conn, dict(sorted(markets.items()))]
+                for conn, markets in sorted(self._recovery.items(), key=lambda kv: str(kv[0]))
+            ],
+            "stats": self.stats.as_dict(),
+            "last_position": self.last_position,
+            "last_received_ts_ms": self.last_received_ts_ms,
+        }
+
+    @classmethod
+    def from_state(
+        cls, state: dict[str, Any], *, clock_ns: Callable[[], int] = time.perf_counter_ns
+    ) -> BookManager:
+        markets = [Market.model_validate(m["market"]) for m in state["markets"]]
+        mgr = cls(
+            markets, source=state["source"], clock_ns=clock_ns, max_future_ms=state["max_future_ms"]
+        )
+        for m in state["markets"]:
+            st = mgr._markets[m["market"]["market_id"]]
+            st.status = MarketStatus(m["status"])
+            st.sync = SyncStatus(m["sync"])
+            st.reason = m["reason"]
+            st.sid = m["sid"]
+            st.connection_id = m["connection_id"]
+            st.yes = {Decimal(p): Decimal(q) for p, q in m["yes"]}
+            st.no = {Decimal(p): Decimal(q) for p, q in m["no"]}
+            st.last_seq = m["last_seq"]
+            st.exchange_ts_ms = m["exchange_ts_ms"]
+            st.received_ts_ms = m["received_ts_ms"]
+            st.last_sync_ts_ms = m["last_sync_ts_ms"]
+        for conn, sid, last_seq, members in state["subscriptions"]:
+            mgr._subs[(conn, sid)] = _Subscription(
+                sid=sid, connection_id=conn, last_seq=last_seq, markets=set(members)
+            )
+        mgr._confirmed = dict(state["confirmed"])
+        mgr._recovery = {conn: dict(markets) for conn, markets in state["recovery"]}
+        mgr.stats = ManagerStats(**state["stats"])
+        mgr.last_position = state["last_position"]
+        mgr.last_received_ts_ms = state["last_received_ts_ms"]
+        return mgr
 
     # ------------------------------------------------------------------ processing
     def process(self, msg: StreamMessage) -> list[BookUpdate]:

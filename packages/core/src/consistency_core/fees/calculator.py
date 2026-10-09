@@ -106,6 +106,10 @@ class FeeCalculator:
         self.registry = registry
         self._versions = {s.schedule_id: sha256_of(s) for s in registry.schedules}
 
+    def schedule_versions(self) -> dict[str, str]:
+        """``schedule_id -> sha256`` of every loaded schedule (the version recorded in proofs)."""
+        return dict(sorted(self._versions.items()))
+
     def resolve(
         self,
         market: Market,

@@ -20,6 +20,12 @@ any further market-data message, via the non-blocking ``CoalescingQueue.put_urge
 Every recovery request from the manager is forwarded to ``source.request_recovery``. Updates are
 always coalesced with :func:`merge_book_updates`, so a desync superseded by a resync before the
 consumer read it surfaces as ``interrupted=True`` (see ``queues``).
+
+An optional :class:`RunnerListener` sees the same transitions *inline and in processing order*:
+``on_message`` after every message is applied (awaited, so a slow listener applies
+backpressure to the inbound queue), and ``on_loss`` for every runner-originated desync
+(synchronous and non-blocking, because it also runs on cancellation). The detection pipeline
+uses it so that live processing and a replay of the recorded journal are identical.
 """
 
 from __future__ import annotations
@@ -28,6 +34,7 @@ import asyncio
 import random
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from consistency_connectors.base import (
     MarketDataSource,
@@ -75,6 +82,24 @@ _EOS = _EndOfStream()
 type _Inbound = StreamMessage | _EndOfStream | _LostConnection
 
 
+@dataclass(frozen=True)
+class RunnerLoss:
+    """A runner-originated loss of trust (no market-data message carried it).
+
+    ``connection_ids``: connections passed to ``BookManager.connection_lost`` in this order;
+    ``recovery_request``: set when ``BookManager.recovery_failed`` was applied instead."""
+
+    reason: str
+    connection_ids: tuple[str, ...] = ()
+    recovery_request: RecoveryRequest | None = None
+
+
+class RunnerListener(Protocol):
+    async def on_message(self, msg: StreamMessage, updates: Sequence[BookUpdate]) -> None: ...
+
+    def on_loss(self, loss: RunnerLoss, updates: Sequence[BookUpdate]) -> None: ...
+
+
 @dataclass
 class RunnerStats:
     reconnect_attempts: int = 0
@@ -99,7 +124,9 @@ class IngestionRunner:
         backoff: Backoff | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         recovery_timeout_s: float | None = 30.0,
+        listener: RunnerListener | None = None,
     ) -> None:
+        self.listener = listener
         self.source = source
         self.manager = manager
         self.updates = updates
@@ -184,11 +211,16 @@ class IngestionRunner:
                 return
 
     def _publish_loss(self, reason: str) -> None:
-        for conn in sorted(self._connections):
+        conns = tuple(sorted(self._connections))
+        published: list[BookUpdate] = []
+        for conn in conns:
             for update in self.manager.connection_lost(conn, reason):
                 self.updates.put_urgent(update.market_id, update, merge=merge_book_updates)
                 self.stats.desyncs_published += 1
+                published.append(update)
         self._connections.clear()
+        if conns and self.listener is not None:
+            self.listener.on_loss(RunnerLoss(reason, conns), published)
 
     async def _consumer(self) -> None:
         while True:
@@ -204,9 +236,13 @@ class IngestionRunner:
                 self._connections.discard(item.event.connection_id)  # handled by the manager
             elif conn is not None:
                 self._connections.add(conn)
-            for update in self.manager.process(item):
+            processed = self.manager.process(item)
+            requests = self.manager.drain_recovery_requests()
+            if self.listener is not None:
+                await self.listener.on_message(item, processed)
+            for update in processed:
                 await self.updates.put(update.market_id, update, merge=merge_book_updates)
-            for req in self.manager.drain_recovery_requests():
+            for req in requests:
                 self.stats.recovery_requests += 1
                 if not await self._request_recovery(req):
                     return
@@ -225,9 +261,12 @@ class IngestionRunner:
             self.stats.errors.append(type(exc).__name__)
             self.failed = f"recovery failed: {type(exc).__name__}: {exc}"
             reason = DesyncReason.RECOVERY_FAILED
-            for update in self.manager.recovery_failed(req, reason):
+            failed = self.manager.recovery_failed(req, reason)
+            for update in failed:
                 self.updates.put_urgent(update.market_id, update, merge=merge_book_updates)
                 self.stats.desyncs_published += 1
+            if self.listener is not None:
+                self.listener.on_loss(RunnerLoss(reason, recovery_request=req), failed)
             self._publish_loss(reason)
             return False
         return True

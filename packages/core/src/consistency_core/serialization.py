@@ -18,6 +18,14 @@ from consistency_core.money import dec_str
 
 
 def to_jsonable(value: Any) -> Any:
+    t = type(value)
+    # Exact-type fast paths (subclasses such as StrEnum / IntEnum take the general path below).
+    if t is str or t is int or t is bool or value is None:
+        return value
+    if t is dict:
+        return {str(k): to_jsonable(v) for k, v in value.items()}
+    if t is list or t is tuple:
+        return [to_jsonable(v) for v in value]
     if isinstance(value, BaseModel):
         return to_jsonable(value.model_dump(mode="json"))
     if isinstance(value, Decimal):

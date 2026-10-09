@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from functools import lru_cache
 
 from pydantic import AwareDatetime, Field, JsonValue, model_validator
 
@@ -50,7 +51,12 @@ class MarketRules(FrozenModel):
 
 
 def compute_rules_hash(rules_text: str, settlement: SettlementSpec) -> str:
-    payload = {"rules_text": rules_text, "settlement": settlement.model_dump(mode="json")}
+    return _rules_hash(rules_text, settlement.model_dump_json())
+
+
+@lru_cache(maxsize=4096)
+def _rules_hash(rules_text: str, settlement_json: str) -> str:
+    payload = {"rules_text": rules_text, "settlement": json.loads(settlement_json)}
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
 

@@ -12,6 +12,7 @@ members = [
     "consistency-connectors",
     "consistency-core",
     "consistency-engine",
+    "consistency-pipeline",
     "consistency-simulation",
     "consistency-worker",
 ]
@@ -197,6 +198,7 @@ dependencies = [
     { name = "consistency-api" },
     { name = "consistency-connectors" },
     { name = "consistency-core" },
+    { name = "consistency-pipeline" },
     { name = "consistency-simulation" },
     { name = "consistency-worker" },
 ]
@@ -217,6 +219,7 @@ requires-dist = [
     { name = "consistency-api", editable = "apps/api" },
     { name = "consistency-connectors", editable = "packages/connectors" },
     { name = "consistency-core", editable = "packages/core" },
+    { name = "consistency-pipeline", editable = "packages/pipeline" },
     { name = "consistency-simulation", editable = "packages/simulation" },
     { name = "consistency-worker", editable = "apps/worker" },
 ]
@@ -230,6 +233,21 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "ruff", specifier = ">=0.6" },
     { name = "types-pyyaml", specifier = ">=6.0" },
+]
+
+[[package]]
+name = "consistency-pipeline"
+version = "0.1.0"
+source = { editable = "packages/pipeline" }
+dependencies = [
+    { name = "consistency-connectors" },
+    { name = "consistency-core" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "consistency-connectors", editable = "packages/connectors" },
+    { name = "consistency-core", editable = "packages/core" },
 ]
 
 [[package]]
@@ -250,6 +268,7 @@ source = { editable = "apps/worker" }
 dependencies = [
     { name = "consistency-connectors" },
     { name = "consistency-core" },
+    { name = "consistency-pipeline" },
     { name = "consistency-simulation" },
 ]
 
@@ -257,6 +276,7 @@ dependencies = [
 requires-dist = [
     { name = "consistency-connectors", editable = "packages/connectors" },
     { name = "consistency-core", editable = "packages/core" },
+    { name = "consistency-pipeline", editable = "packages/pipeline" },
     { name = "consistency-simulation", editable = "packages/simulation" },
 ]
 

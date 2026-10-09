@@ -3,12 +3,18 @@ name = "consistency-worker"
 version = "0.1.0"
 description = "Ingestion / detection / replay worker for Consistency Engine."
 requires-python = ">=3.12"
-dependencies = ["consistency-core", "consistency-connectors", "consistency-simulation"]
+dependencies = [
+    "consistency-core",
+    "consistency-connectors",
+    "consistency-simulation",
+    "consistency-pipeline",
+]
 
 [tool.uv.sources]
 consistency-core = { workspace = true }
 consistency-connectors = { workspace = true }
 consistency-simulation = { workspace = true }
+consistency-pipeline = { workspace = true }
 
 [build-system]
 requires = ["hatchling>=1.24"]

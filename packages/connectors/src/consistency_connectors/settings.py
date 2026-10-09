@@ -35,7 +35,40 @@ class Settings(BaseSettings):
     replay_dataset_path: str = Field(default="fixtures/datasets/smoke", alias="REPLAY_DATASET_PATH")
     synthetic_seed: int = Field(default=20260115, alias="SYNTHETIC_SEED")
     synthetic_playback_speed: float = Field(default=1.0, alias="SYNTHETIC_PLAYBACK_SPEED")
+    synthetic_preset: str = Field(default="inconsistent", alias="SYNTHETIC_PRESET")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+
+    # Reference data
+    fee_schedule_dir: str = Field(default="fixtures/fees", alias="FEE_SCHEDULE_DIR")
+    relationship_reviews_path: str = Field(
+        default="fixtures/relationships/manual-reviews.yaml", alias="RELATIONSHIP_REVIEWS_PATH"
+    )
+
+    # Persistence (PostgreSQL via asyncpg). Unset -> the worker runs without persistence and
+    # says so in its logs and health; it never substitutes another database.
+    database_url: str | None = Field(default=None, alias="DATABASE_URL")
+    persist_market_data: bool = Field(default=True, alias="PERSIST_MARKET_DATA")
+    """Record the session journal (snapshots/updates) for synthetic and replay sources."""
+    third_party_raw_persistence_authorized: bool = Field(
+        default=False, alias="THIRD_PARTY_RAW_PERSISTENCE_AUTHORIZED"
+    )
+    """Gate for storing raw third-party (e.g. Kalshi) market data; see docs/compliance.md."""
+    retention_max_age_hours: int = Field(default=168, alias="RETENTION_MAX_AGE_HOURS")
+    retention_max_sessions: int = Field(default=20, alias="RETENTION_MAX_SESSIONS")
+    retention_third_party_hours: int = Field(default=0, alias="RETENTION_THIRD_PARTY_HOURS")
+    retention_interval_s: int = Field(default=3600, alias="RETENTION_INTERVAL_S")
+
+    # Pipeline
+    sweep_interval_ms: int = Field(default=100, alias="SWEEP_INTERVAL_MS")
+    checkpoint_every: int = Field(default=2000, alias="CHECKPOINT_EVERY")
+    journal_batch_size: int = Field(default=500, alias="JOURNAL_BATCH_SIZE")
+    outbox_maxsize: int = Field(default=1024, alias="OUTBOX_MAXSIZE")
+    update_queue_maxsize: int = Field(default=10_000, alias="UPDATE_QUEUE_MAXSIZE")
+    inbound_queue_maxsize: int = Field(default=10_000, alias="INBOUND_QUEUE_MAXSIZE")
+    heartbeat_timeout_s: float = Field(default=10.0, alias="HEARTBEAT_TIMEOUT_S")
+    supervisor_max_restarts: int = Field(default=8, alias="SUPERVISOR_MAX_RESTARTS")
+    supervisor_backoff_base_s: float = Field(default=0.5, alias="SUPERVISOR_BACKOFF_BASE_S")
+    supervisor_backoff_max_s: float = Field(default=30.0, alias="SUPERVISOR_BACKOFF_MAX_S")
 
     @model_validator(mode="after")
     def _guard(self) -> Settings:
@@ -50,6 +83,18 @@ class Settings(BaseSettings):
             )
         if self.synthetic_playback_speed <= 0:
             raise ConfigurationError("SYNTHETIC_PLAYBACK_SPEED must be positive.")
+        for name in (
+            "sweep_interval_ms",
+            "checkpoint_every",
+            "journal_batch_size",
+            "outbox_maxsize",
+            "update_queue_maxsize",
+            "inbound_queue_maxsize",
+        ):
+            if getattr(self, name) <= 0:
+                raise ConfigurationError(f"{name.upper()} must be positive.")
+        if min(self.retention_max_age_hours, self.retention_max_sessions) < 0:
+            raise ConfigurationError("retention limits must be >= 0.")
         return self
 
     @property
@@ -64,3 +109,23 @@ class Settings(BaseSettings):
             "kalshi_authorization_confirmed": str(self.kalshi_authorization_confirmed).lower(),
             "enable_live_trading": str(self.enable_live_trading).lower(),
         }
+
+    def persistence_summary(self) -> dict[str, str]:
+        return {
+            "persistence": "postgresql" if self.database_url else "disabled",
+            "raw_market_data_persisted": str(self.raw_market_data_persisted).lower(),
+        }
+
+    @property
+    def is_third_party_source(self) -> bool:
+        return self.data_source is DataSourceMode.KALSHI_AUTHORIZED
+
+    @property
+    def raw_market_data_persisted(self) -> bool:
+        """Journal recording gate: on for synthetic/replay (configurable), and for third-party
+        sources only when explicitly authorized (default off; docs/compliance.md)."""
+        if not self.persist_market_data:
+            return False
+        if self.is_third_party_source:
+            return self.third_party_raw_persistence_authorized
+        return True
