@@ -185,9 +185,13 @@ class _LiveSource(MarketDataSource):
     kind = DataSourceKind.SYNTHETIC
     stream_is_finite = False
 
-    def __init__(self, sessions: list[list[object]], *, after: str = "hang") -> None:
+    def __init__(
+        self, sessions: list[list[object]], *, after: str = "hang", hold_open: bool = False
+    ) -> None:
         self.sessions = sessions
         self.after = after
+        self.hold_open = hold_open
+        self.holding = asyncio.Event()
         self.subscriptions = 0
         self.feed = Feed()
 
@@ -223,6 +227,11 @@ class _LiveSource(MarketDataSource):
                 ev, dt = item, 10
             yield self.feed.msg(ev, dt=dt)  # type: ignore[arg-type]
             await asyncio.sleep(0)
+        if self.hold_open:
+            # The subscription stays open. Shutdown must cancel the runner (RUNNER_STOPPED)
+            # rather than observe this iterator ending (END_OF_STREAM).
+            self.holding.set()
+            await asyncio.Future()
 
     async def unsubscribe_orderbooks(self, market_ids: Sequence[str]) -> None:
         return None
@@ -411,6 +420,62 @@ async def test_worker_graceful_stop_on_live_source_closes_detections() -> None:
     detection_events = [p["event"] for p in payloads if "detection" in p]
     assert detection_events[:2] == ["OPENED", "UPDATED"]
     assert detection_events[-1] == "INVALIDATED"  # RUNNER_STOPPED desync on shutdown
+    assert payloads[-1] == {
+        "event": "session_finished",
+        "session_id": result.session_id,
+        "status": "stopped",
+    }
+
+
+async def test_worker_stop_while_stream_held_invalidates_with_runner_stopped() -> None:
+    """Shutdown while a live subscription is still open invalidates the active detection
+    because the runner was cancelled, not because the source ended."""
+    src = _LiveSource([_session("s1", 12)], hold_open=True)
+    inputs = await _inputs(src, deterministic=False)
+    svc = WorkerService(
+        Settings(HEARTBEAT_TIMEOUT_S=3600),
+        inputs=inputs,
+        sleep=_no_sleep,
+        wall_clock_ms=lambda: (
+            0 if svc.listener is None else (svc.listener.manager.last_received_ts_ms or 0)
+        ),
+    )
+    sub = svc.broker.subscribe({"detection", "system"})
+    stop = asyncio.Event()
+    task = asyncio.create_task(svc.run(stop))
+    await asyncio.wait_for(svc.started.wait(), 2)
+
+    async def _active_while_held() -> list[str]:
+        while True:
+            listener = svc.listener
+            if listener is not None and src.holding.is_set():
+                active = listener.engine.active_detections()
+                if active:
+                    return [row.detection_id for row in active]
+            await asyncio.sleep(0.01)
+
+    active_ids = await asyncio.wait_for(_active_while_held(), 5)
+    assert src.holding.is_set()
+    assert src.subscriptions == 1
+    stop.set()
+    result = await asyncio.wait_for(task, 5)
+    assert result.status == "stopped"
+    payloads = []
+    while (m := sub.get_nowait()) is not None:
+        payloads.append(m.payload)
+    for detection_id in active_ids:
+        matches = [
+            payload
+            for payload in payloads
+            if payload.get("event") == "INVALIDATED"
+            and payload["detection"]["detection_id"] == detection_id
+        ]
+        assert len(matches) == 1
+        detail = matches[0]["detection"]["close_detail"] or ""
+        assert "RUNNER_STOPPED" in detail
+        assert "END_OF_STREAM" not in detail
+        assert matches[0]["detection"]["close_reason"] == "BOOK_UNSYNCHRONIZED"
+        assert matches[0]["detection"]["status"] == "INVALIDATED"
     assert payloads[-1] == {
         "event": "session_finished",
         "session_id": result.session_id,

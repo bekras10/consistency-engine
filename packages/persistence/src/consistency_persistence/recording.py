@@ -6,6 +6,7 @@ writes the detection, its legs, its scenarios, and the certificate v2 JSON in on
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from decimal import Decimal
 from typing import Any
@@ -88,6 +89,7 @@ class BatchJournal:
         self._batch_size = batch_size
         self._enabled = enabled
         self._buf: list[JournalEntry] = []
+        self._flush_lock = asyncio.Lock()
 
     def append(self, entry: JournalEntry) -> None:
         if self._enabled:
@@ -98,17 +100,19 @@ class BatchJournal:
             await self.flush()
 
     async def flush(self) -> None:
-        if not self._buf:
-            return
-        # Keep the buffer until the commit succeeds. A failed transaction must not drop
-        # entries; the next flush retries the same batch. Appends during the attempt stay
-        # behind the prefix that was sent.
-        batch = list(self._buf)
-        async with self._sessions() as session, session.begin():
-            await _insert_journal(session, self._session_id, self._versions, batch)
-        if self._buf[: len(batch)] != batch:
-            raise RuntimeError("journal buffer changed during flush")
-        del self._buf[: len(batch)]
+        # One flush at a time, including the buffer read, the insert transaction, and the
+        # prefix delete. Overlapping flushes would insert the same ordinals twice. Appends
+        # are synchronous and only land at the await inside the transaction; they stay
+        # behind the prefix that was sent. The buffer is dropped only after commit.
+        async with self._flush_lock:
+            if not self._buf:
+                return
+            batch = list(self._buf)
+            async with self._sessions() as session, session.begin():
+                await _insert_journal(session, self._session_id, self._versions, batch)
+            if self._buf[: len(batch)] != batch:
+                raise RuntimeError("journal buffer changed during flush")
+            del self._buf[: len(batch)]
 
 
 async def _insert_journal(

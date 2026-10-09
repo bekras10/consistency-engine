@@ -462,6 +462,22 @@ end-of-stream inside one 10 ms poll and closes that detection first. The same ti
 with the pre-change engine. The wait now also accepts a detection that has already been
 updated and closed. The shutdown assertions are unchanged.
 
+## Hardening pass (post 6ad5552) — 2026-10-09
+
+The six earlier fixes stay as they were. This pass adds a lock around journal flush and a
+shutdown test that can actually observe `RUNNER_STOPPED`.
+
+| Issue | Regression | Pre-fix failure | Fix |
+|---|---|---|---|
+| Concurrent journal flush | `test_overlapping_flushes_persist_each_ordinal_once_in_order` | the second flush inserted ordinal 0 while the first transaction still held it (`unique constraint violation on ordinal 0`) | `asyncio.Lock` covers the buffer read, the insert transaction, and the prefix delete. Appends during the await stay behind that prefix. The buffer is still dropped only after commit |
+| Graceful stop while the stream is open | `test_worker_stop_while_stream_held_invalidates_with_runner_stopped` | coverage only. The existing live-source test can see `END_OF_STREAM` close the detection before shutdown; its assertions were not changed | the new source holds the subscription open after an active detection exists. Shutdown invalidates that detection with `RUNNER_STOPPED` |
+
+Phase 11's `notification_outbox` is still not created. `docs/architecture.md` now records that
+a `BIGSERIAL` id is assigned before commit, so assignment order is not commit order. A poller
+that advances to the highest visible id can skip a row whose transaction commits later, and
+waiting for every integer stalls on a rolled-back sequence value. The next phase has to
+serialize outbox inserts or use a visibility rule before `id` is a resume token.
+
 ## How to resume Phase 10
 
 Phase 10 is the Next.js dashboard (`apps/web`). Do not start it by extending health routes into

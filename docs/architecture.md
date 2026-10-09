@@ -120,3 +120,30 @@ The API polls `WHERE id > :cursor ORDER BY id`. Clients resume with `Last-Event-
 current row, not a reconstructed history) and then tails the outbox from the greatest `id`
 observed when that read began. Polling `detections` alone is not an event log: an update
 overwrites the row. The outbox is the tail; the detection table is the snapshot.
+
+### Concurrent commit order
+
+`id` is `bigserial`. `nextval` runs at INSERT, before COMMIT, and a rolled-back insert does
+not return the value. Assignment order is not commit order.
+
+Two detection transactions can overlap:
+
+1. Transaction A inserts an outbox row and is given id 10. It has not committed.
+2. Transaction B inserts an outbox row, is given id 11, and commits.
+3. A poller running `WHERE id > :cursor ORDER BY id` sees 11, advances the cursor to 11, and
+   emits that event.
+4. Transaction A commits id 10. The poller has already moved past it.
+
+Waiting for the missing integer is not enough either. A rollback leaves a permanent hole, so
+a consumer that blocks until every id arrives will stall. A `created_at` delay does not fix
+it: that column is insert time, not commit time.
+
+Phase 11 has to close this before `id` is a resume token. Either serialize outbox inserts so
+the next id is taken only after the previous outbox transaction commits (one writer, or a
+transaction-scoped advisory lock held from the insert through commit), or poll with a
+visibility rule that does not treat the highest visible id as a safe cursor. In the second
+shape, advance only through ids whose transactions are known to have committed (a snapshot
+such as `pg_current_snapshot()` can show which writers are still in progress) and do not
+move the cursor across a hole that might still commit. A hole whose transaction aborted has
+to be recognized as gone. The `detections` row stays the resynchronization snapshot when the
+tail is uncertain. This pass still does not create the table.
