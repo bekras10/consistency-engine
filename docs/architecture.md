@@ -147,3 +147,13 @@ such as `pg_current_snapshot()` can show which writers are still in progress) an
 move the cursor across a hole that might still commit. A hole whose transaction aborted has
 to be recognized as gone. The `detections` row stays the resynchronization snapshot when the
 tail is uncertain. This pass still does not create the table.
+
+## Dashboard
+
+Phase 10's Next.js app reads PostgreSQL through `consistency_persistence`. A local gateway
+process (`scripts/dashboard_gateway.py`, `/internal/...`) holds that access and one
+`PlaybackService`. The browser talks only to Next routes under `/app-data`, which proxy the
+gateway, and polls those routes. The pages label the refresh as polling. There is no SSE
+stream and no public `/api/v1` catalog; both are Phase 11. Prices stay fixed-point strings.
+A depth chart scales those strings to integers for pixel positions and labels the axis from
+the same scale.

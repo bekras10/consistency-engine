@@ -407,10 +407,9 @@ hashes, and event order (63 events), and seek-via-checkpoint IDENTICAL.
 
 ## Known limitations (after Phase 9)
 
-- No dashboard (Phase 10) and no public REST or SSE API (Phase 11). Health live/ready exist;
+- Public REST and SSE (Phase 11) are not implemented. Health live/ready exist;
   readiness returns 503 `database_unavailable` when `DATABASE_URL` is set and Postgres is down.
-- `make dev` starts Postgres, applies migrations, and runs the worker. It prints that the
-  frontend is not started. `make build` and `make benchmark` still exit 2.
+- Phase 10's dashboard is recorded in the Phase 10 section below. `make benchmark` still exits 2.
 - Large-domain search is exact (`BOUNDED_EXACT`) unless refinement would exceed 50 000 extra
   points; it then falls back to a labelled `BREAKPOINT_APPROXIMATE` result that can miss optima
   (measured rates in the hardening section). Exhaustive search is used for all bundled fixtures.
@@ -478,11 +477,51 @@ that advances to the highest visible id can skip a row whose transaction commits
 waiting for every integer stalls on a rolled-back sequence value. The next phase has to
 serialize outbox inserts or use a visibility rule before `id` is a resume token.
 
-## How to resume Phase 10
+## Phase 10 — dashboard ✅
 
-Phase 10 is the Next.js dashboard (`apps/web`). Do not start it by extending health routes into
-a detection API; public REST and SSE are Phase 11. Read persisted detections through
-`consistency_persistence` (certificate JSON, legs, scenarios). Replay controls should call
-`consistency_pipeline.playback.PlaybackService` rather than a second engine. `make dev` must
-keep failing visibly if the frontend cannot start, and must not report success for a missing UI.
+The Next.js app in `apps/web` reads PostgreSQL through `consistency_persistence`. A local
+gateway (`scripts/dashboard_gateway.py`, `http://127.0.0.1:8765/internal/...`) is the only
+process that opens the database and the in-process `PlaybackService`. Next server components
+call that gateway. The browser polls Next routes under `/app-data`, which proxy `/internal`.
+Pages say the refresh is polling. There is no SSE stream and no public `/api/v1` catalog;
+both stay in Phase 11. Health live/ready are unchanged.
+
+Prices and quantities stay fixed-point strings. Depth charts scale those strings to integers
+for geometry and label the axes from the same scale.
+
+`make dev` starts Postgres, migrations, a fast synthetic session when no detections are stored
+(`scripts/load_synthetic_session.py`), the synthetic worker, the gateway, and Next.js. It exits
+non-zero if the gateway or the frontend does not answer. `make build` runs the Next production
+build. `make benchmark` still exits 2.
+
+| Page | Data |
+|---|---|
+| `/` | Latest session, source health, market and detection counts, verified relationship count (`verification_status = verified`), sync summary from the journal book, p50/p95 of stored `detection_completed_ns - processing_started_ns`, recent detections, activity buckets. A synthetic source shows a Synthetic simulation label. An empty database shows the seed hint and no invented rows. |
+| `/relationships`, `/relationships/[id]` | Stored relationships, filters, constituents, constraints, and a link to the latest detection for that relationship. |
+| `/detections`, `/detections/[id]` | Current net edge from `metrics`, with the historical maximum beside it. Detail includes the certificate, legs, scenarios, settlement text, latest book, lifecycle, and a copyable technical report. |
+| `/markets`, `/markets/[id]` | Stored markets and a depth chart of the latest journal book. |
+| `/replay/[id]` | `PlaybackService` start, pause, resume, restart, step, seek, and speed. The page polls the snapshot. |
+| `/methodology`, `/about` | Text read from `docs/mathematical-model.md`, `docs/compliance.md`, and `README.md`. |
+
+Playwright (`apps/web/e2e`, `scripts/e2e.sh`) covers the seeded dashboard, relationship filter,
+detection proof, copy report, replay start/pause/seek, and a page rendered after the gateway
+is stopped. That disconnected journey is a second spec because the first paint is server-rendered
+and does not go through the browser's network stack. Playwright is local. CI runs frontend lint,
+typecheck, Vitest, and `next build`. It does not start Postgres plus Next plus Chromium for e2e.
+
+### Still incomplete (Phase 11 and later)
+
+- Public `/api/v1/markets`, `/api/v1/detections`, `/api/v1/stream`, and the other versioned
+  catalog and replay routes. Replay stays on the internal gateway.
+- SSE or WebSocket. The UI polls and says so.
+- The `notification_outbox` table, with commit-order safety as written in `docs/architecture.md`.
+- `make benchmark` and deployment images.
+- Market depth on a detection page is the latest journal book, not the book at first observation.
+  Replay is the cursor-accurate book.
+
+## How to resume Phase 11
+
+Add the public read API and the SSE stream from the outbox contract in `docs/architecture.md`.
+Do not treat `BIGSERIAL` assignment order as commit order. The dashboard can later subscribe
+instead of polling `/app-data`; until then the polling label stays.
 

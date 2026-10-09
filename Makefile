@@ -9,7 +9,7 @@ PYTEST := $(UV) run --frozen pytest
 export PYTHONPATH := packages/core/src:packages/simulation/src:packages/connectors/src:packages/pipeline/src:packages/persistence/src:apps/api/src:apps/worker/src$(if $(PYTHONPATH),:$(PYTHONPATH),)
 
 .PHONY: help setup dev test test-unit test-property test-golden lint format typecheck build \
-        seed datasets replay benchmark api clean
+        seed datasets replay benchmark api clean e2e
 
 help:
 	@echo "setup      install Python workspace (uv sync)"
@@ -22,8 +22,9 @@ help:
 	@echo "seed       load synthetic markets, relationships, reviews, fees into Postgres"
 	@echo "replay     replay the bundled inconsistent session and print the comparison"
 	@echo "api        run the FastAPI app (health endpoints; readiness checks Postgres)"
-	@echo "dev        start Postgres, migrate, and run the worker (no frontend)"
-	@echo "build / benchmark: later milestones"
+	@echo "dev        Postgres, migrations, synthetic worker, gateway, and Next.js"
+	@echo "build      production build of the Next.js dashboard"
+	@echo "benchmark  later milestone"
 
 setup:
 	$(UV) sync
@@ -69,16 +70,13 @@ api:
 	$(UV) run --frozen uvicorn consistency_api.main:app --reload --port 8000
 
 dev:
-	docker compose up -d db
-	@echo "Frontend (Phase 10) is not started. This target runs the database and the worker only."
-	DATABASE_URL="$${DATABASE_URL:-postgresql+asyncpg://consistency:consistency@127.0.0.1:$${POSTGRES_PORT:-5432}/consistency}" \
-	  $(UV) run --frozen alembic upgrade head
-	DATABASE_URL="$${DATABASE_URL:-postgresql+asyncpg://consistency:consistency@127.0.0.1:$${POSTGRES_PORT:-5432}/consistency}" \
-	  $(UV) run --frozen python -m consistency_worker
+	bash scripts/dev.sh
 
 build:
-	@echo "make build: not yet implemented — production images arrive with the deployment milestone." >&2
-	@exit 2
+	npm --prefix apps/web run build
+
+e2e:
+	bash scripts/e2e.sh
 
 replay:
 	$(PY) scripts/replay_session.py
