@@ -8,6 +8,7 @@ dependencies = [
     "consistency-connectors",
     "consistency-simulation",
     "consistency-pipeline",
+    "consistency-persistence",
 ]
 
 [tool.uv.sources]
@@ -15,6 +16,7 @@ consistency-core = { workspace = true }
 consistency-connectors = { workspace = true }
 consistency-simulation = { workspace = true }
 consistency-pipeline = { workspace = true }
+consistency-persistence = { workspace = true }
 
 [build-system]
 requires = ["hatchling>=1.24"]

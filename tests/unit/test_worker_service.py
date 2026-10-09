@@ -269,7 +269,7 @@ def _replay(journal: MemoryJournal) -> tuple[BookManager, list[DetectionEvent]]:
 
 async def test_supervisor_restarts_after_live_end_of_stream_and_journal_replays() -> None:
     src = _LiveSource([_session("s1"), _session("s2")], after="auth")
-    mgr, engine, listener, journal, _ = _pipeline()
+    mgr, _engine, listener, journal, _ = _pipeline()
     events: list[DetectionEvent] = []
     listener._on_events = events.extend
     q: CoalescingQueue[BookUpdate] = CoalescingQueue(1000)
@@ -373,16 +373,31 @@ async def _inputs(src: MarketDataSource, *, deterministic: bool) -> SessionInput
 async def test_worker_graceful_stop_on_live_source_closes_detections() -> None:
     src = _LiveSource([_session("s1", 12)])
     inputs = await _inputs(src, deterministic=False)
-    clock = {"ms": 0}
     svc = WorkerService(
-        Settings(), inputs=inputs, sleep=_no_sleep, wall_clock_ms=lambda: clock["ms"]
+        Settings(),
+        inputs=inputs,
+        sleep=_no_sleep,
+        # Follow the stream clock. A frozen 0 makes the live sweep sample books from the
+        # future and can invalidate a detection before the scripted update is published.
+        wall_clock_ms=lambda: (
+            0 if svc.listener is None else (svc.listener.manager.last_received_ts_ms or 0)
+        ),
     )
     sub = svc.broker.subscribe({"detection", "system"})
     stop = asyncio.Event()
     task = asyncio.create_task(svc.run(stop))
     await asyncio.wait_for(svc.started.wait(), 2)
-    while src.subscriptions == 0 or (svc.listener and svc.listener.stats.entries < 14):
-        await asyncio.sleep(0.01)
+
+    async def _saw_update() -> None:
+        while True:
+            listener = svc.listener
+            if listener is not None and any(
+                d.event_count >= 2 for d in listener.engine.active_detections()
+            ):
+                return
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(_saw_update(), 5)
     stop.set()
     result = await asyncio.wait_for(task, 5)
     assert result.status == "stopped"

@@ -166,3 +166,25 @@ optional `rounding`, `methodology`, `quantity_increment`, `event_id`, `series_id
 `cases` with `relationship`, `portfolio`, `config` (an `EvaluationConfig` override),
 `observed_duration_ms`, and `expected` values compared by exact Decimal equality. Dates in
 YAML must be quoted strings (unquoted `2026-08-01` parses as a date).
+
+## Persistence and replay order
+
+A detection row stores the certificate as canonical JSON (`certificate_json`) plus
+`certificate_hash`. Legs and payoff scenarios are child rows in the same transaction. Money
+columns are `NUMERIC`; timestamps are `timestamptz` UTC. Decimal values inside JSON documents
+remain strings.
+
+The deterministic replay order is the journal `ordinal` (0, 1, 2, …) assigned when the worker
+records a message. It is not `StreamMessage.position` and not a timestamp. Two events with the
+same exchange clock are ordered by the ordinal they were assigned. Rebuilding a session applies
+ordinals in ascending order after the latest checkpoint whose `now_ms` is at or before the
+seek target.
+
+Wall-clock telemetry is stored on journal events but excluded from equality checks:
+`processing_started_ns` and `detection_completed_ns`. Source latency
+(`received_at − exchange_time`) is part of the recorded event; internal processing latency is
+not an input to classification.
+
+`session_checkpoints` is the extra table spec §12.2 requires for seek. A checkpoint holds the
+book snapshot, engine state, and journal ordinal. Checkpoints contain raw books, so they are
+written only when raw persistence is enabled for that source.

@@ -16,6 +16,20 @@ jobs:
       ENABLE_KALSHI_API: "false"
       KALSHI_AUTHORIZATION_CONFIRMED: "false"
       ENABLE_LIVE_TRADING: "false"
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: consistency
+          POSTGRES_PASSWORD: consistency
+          POSTGRES_DB: consistency
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U consistency -d consistency"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -35,3 +49,14 @@ jobs:
         run: uv run --frozen pytest tests/property
       - name: Bundled fixtures are reproducible
         run: uv run --frozen python scripts/generate_datasets.py --bundled --check
+      - name: Migrations up, down, up
+        env:
+          DATABASE_URL: postgresql+asyncpg://consistency:consistency@127.0.0.1:5432/consistency
+        run: |
+          uv run --frozen alembic upgrade head
+          uv run --frozen alembic downgrade base
+          uv run --frozen alembic upgrade head
+      - name: Integration tests
+        env:
+          DATABASE_URL: postgresql+asyncpg://consistency:consistency@127.0.0.1:5432/consistency
+        run: uv run --frozen pytest tests/integration

@@ -59,3 +59,25 @@ authorized live integration.
 - Even on real data, a `FEE_ADJUSTED_CANDIDATE` is evidence about independently observed
   displayed books, not proof that an atomic multi-market execution was available. Every
   certificate carries this disclaimer.
+
+## Raw data retention
+
+Non-synthetic sources persist **no raw order-book data by default**. `Settings.persist_market_data`
+is true only for `synthetic` and `replay`. A third-party source persists raw rows only when
+`THIRD_PARTY_RAW_PERSISTENCE_AUTHORIZED=true`, which this repository never sets. Catalog rows
+(markets, relationships, reviews, fee schedules) and detection certificates are not raw books;
+they are stored so a result can be audited. Checkpoints embed books and follow the same raw-data
+gate.
+
+The cleanup job (`RETENTION_INTERVAL_S`, default one hour) applies `RetentionPolicy`:
+
+- Sessions labeled `synthetic:inconsistent` or `replay:inconsistent` are pinned. Their snapshots,
+  deltas, and checkpoints are kept so the bundled demo can be reconstructed exactly.
+- Any other synthetic or replay session loses raw rows once it is older than
+  `RETENTION_MAX_AGE_HOURS` (default 168). Among the sessions still inside that window, only the
+  newest `RETENTION_MAX_SESSIONS` (default 20) keep raw rows.
+- Third-party raw rows are deleted once they are older than `RETENTION_THIRD_PARTY_HOURS`
+  (default 0, meaning immediately on the next cleanup).
+
+Deleting raw data removes `orderbook_snapshots`, `orderbook_updates`, and `session_checkpoints`
+and sets `raw_persisted` false. Detections, relationships, and market metadata stay.

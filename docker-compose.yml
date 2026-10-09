@@ -8,7 +8,8 @@ services:
       POSTGRES_PASSWORD: consistency
       POSTGRES_DB: consistency
     ports:
-      - "5432:5432"
+      # Host 5432 is often taken by a system Postgres. Override with POSTGRES_PORT.
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:

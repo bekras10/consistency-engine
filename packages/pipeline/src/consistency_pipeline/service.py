@@ -21,7 +21,7 @@ import asyncio
 import logging
 import time
 from collections import deque
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -161,6 +161,7 @@ class PipelineListener:
         clock_ms: Callable[[], int] | None = None,
         clock_ns: Callable[[], int] = time.perf_counter_ns,
         on_events: Callable[[list[DetectionEvent]], None] | None = None,
+        before_checkpoint: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         if checkpoint_every <= 0:
             raise ValueError("checkpoint_every must be positive")
@@ -176,6 +177,7 @@ class PipelineListener:
         self._clock_ms = clock_ms or self._stream_clock
         self._clock_ns = clock_ns
         self._on_events = on_events
+        self._before_checkpoint = before_checkpoint
         self.stats = ListenerStats()
 
     def _stream_clock(self) -> int:
@@ -302,6 +304,11 @@ class PipelineListener:
             self.engine,
         )
         self._since_checkpoint = 0
+        # Persist queued detections before the checkpoint is recorded, so a resume point never
+        # references evaluations that were not committed. Callers that have no writer leave this
+        # unset (draining without a writer would wait forever).
+        if self._before_checkpoint is not None:
+            await self._before_checkpoint()
         if self.journal is not None:
             await self.journal.flush()
         await self.checkpoints.save(snap)

@@ -168,6 +168,10 @@ class WorkerService:
             )
             start_ordinal = 0
         outbox = Outbox(opened.sink, self.broker, maxsize=s.outbox_maxsize)
+
+        async def _drain_outbox() -> None:
+            await asyncio.wait_for(outbox.drain(), timeout=30)
+
         listener = PipelineListener(
             engine,
             outbox,
@@ -177,6 +181,7 @@ class WorkerService:
             start_ordinal=start_ordinal,
             clock_ms=None if inputs.deterministic else self._wall_ms,
             on_events=self._log_events,
+            before_checkpoint=_drain_outbox,
         )
         if resume is not None:
             listener.last_message_position = resume.source_position
@@ -230,6 +235,9 @@ class WorkerService:
             asyncio.create_task(outbox.run(), name="outbox"),
             asyncio.create_task(self._feed(updates, manager), name="market-feed"),
         ]
+        retain = getattr(self.store, "retention_loop", None)
+        if retain is not None:
+            background.append(asyncio.create_task(retain(), name="retention"))
         if not inputs.deterministic:
             background.append(asyncio.create_task(self._ticker(listener), name="ticker"))
         sup_task = asyncio.create_task(supervisor.run(), name="supervisor")

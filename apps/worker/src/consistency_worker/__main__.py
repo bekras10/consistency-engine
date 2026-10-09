@@ -17,16 +17,23 @@ from consistency_connectors.settings import ConfigurationError, Settings
 from consistency_connectors.sources.kalshi import KalshiAccessRefusedError
 from consistency_worker import logs
 from consistency_worker.service import SessionStore, WorkerService
+from consistency_worker.store import DatabaseSessionStore
 
 log = logging.getLogger("consistency.worker")
 
 
 async def _store(settings: Settings) -> SessionStore | None:
-    if settings.database_url:
-        log.warning("persistence is not wired in this build: running without persistence")
-    else:
+    if not settings.database_url:
         log.warning("DATABASE_URL is not set: running without persistence")
-    return None
+        return None
+    store = DatabaseSessionStore(settings)
+    try:
+        await store.ping()
+    except Exception as exc:
+        log.error("database unreachable", extra={"error": type(exc).__name__})
+        raise ConfigurationError("database unreachable") from exc
+    log.info("persistence enabled", extra=settings.persistence_summary())
+    return store
 
 
 async def _run(settings: Settings) -> int:
