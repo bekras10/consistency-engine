@@ -127,6 +127,26 @@ def order_net_fee(
     return total
 
 
+def order_net_fee_lower_bound(
+    fills: Sequence[tuple[Decimal, Decimal]], *, coefficient: Decimal, multiplier: Decimal
+) -> Decimal:
+    """Sum of unrounded model fees: a lower bound on :func:`order_net_fee` for the same fills.
+
+    Proof: per fill ``trade_fee = ceil(model_fee) >= model_fee`` and ``rounding_fee >= 0``. The
+    accumulator starts at 0 and only gains rounding fees, and a rebate never exceeds the
+    accumulator, so after the order ``0 <= accumulator = sum(rounding) - sum(rebate)``. Hence
+    ``net = sum(trade) + sum(rounding) - sum(rebate) >= sum(trade) >= sum(model_fee)``.
+    For fixed price levels the bound is linear in the filled quantities.
+    """
+    return sum(
+        (
+            model_fee(coefficient=coefficient, multiplier=multiplier, price=p, quantity=q)
+            for p, q in fills
+        ),
+        ZERO,
+    )
+
+
 class OrderFeeAccumulator:
     """One order's rounding accumulator; every fill of the order goes through :meth:`fill`."""
 

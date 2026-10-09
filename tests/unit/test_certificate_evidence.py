@@ -12,9 +12,10 @@ from typing import Any
 import pytest
 
 from consistency_core.models.relationship import ReviewRecord, VerificationStatus
+from consistency_core.pricing import evaluator
 from consistency_core.serialization import sha256_of
 from tests.golden.support import NOW_MS, load, run
-from tests.unit.test_evaluator import run_a
+from tests.unit.test_evaluator import _thin_top_deep_book, run_a
 
 D = Decimal
 GATES = (
@@ -107,16 +108,21 @@ def test_config_hash() -> None:
     assert other.certificate.config_hash != ev.certificate.config_hash
 
 
-def test_search_method_and_exactness() -> None:
+def test_search_method_and_exactness(monkeypatch: pytest.MonkeyPatch) -> None:
     ex = run_a().certificate.capacity
     assert ex is not None
     assert ex.method == "EXHAUSTIVE"
     assert ex.optimal_quantity_is_exact is True
-    bp = run_a(config={"exhaustive_search_limit": 5}).certificate.capacity
-    assert bp is not None
-    assert bp.method == "BREAKPOINT_APPROXIMATE"
-    assert bp.optimal_quantity_is_exact is False
-    assert bp.reported_quantity_evaluation_is_exact is True
+    bounded = run_a(fx=_thin_top_deep_book(), config={"exhaustive_search_limit": 5})
+    assert bounded.certificate.capacity is not None
+    assert bounded.certificate.capacity.method == "BOUNDED_EXACT"
+    assert bounded.certificate.capacity.optimal_quantity_is_exact is True
+    monkeypatch.setattr(evaluator, "BOUNDED_REFINEMENT_LIMIT", 0)
+    bp = run_a(fx=_thin_top_deep_book(), config={"exhaustive_search_limit": 5}).certificate
+    assert bp.capacity is not None
+    assert bp.capacity.method == "BREAKPOINT_APPROXIMATE"
+    assert bp.capacity.optimal_quantity_is_exact is False
+    assert bp.capacity.reported_quantity_evaluation_is_exact is True
 
 
 def test_validation_metadata_lists_evaluated_gates() -> None:

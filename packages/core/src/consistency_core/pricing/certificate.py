@@ -144,18 +144,22 @@ class QuantityEvaluation(FrozenModel):
     """Per-unit figures are informational (floored to 1e-8); gates compare totals exactly."""
 
 
-SearchMethod = Literal["EXHAUSTIVE", "BREAKPOINT_APPROXIMATE", "TARGET", "NONE"]
+SearchMethod = Literal["EXHAUSTIVE", "BOUNDED_EXACT", "BREAKPOINT_APPROXIMATE", "TARGET", "NONE"]
 
 
 class QuantitySearch(FrozenModel):
     """How the reported quantity was chosen.
 
     ``EXHAUSTIVE`` evaluates every domain point, so the reported optimum is exact. ``TARGET``
-    evaluates the single requested size (exact by definition). ``BREAKPOINT_APPROXIMATE``
-    evaluates only depth breakpoints +/- a radius plus the endpoints: the optimum over the full
-    domain is *not* guaranteed (``optimal_quantity_is_exact`` is False), although every figure
-    reported at the chosen quantity is an exact re-evaluation at that quantity
-    (``reported_quantity_evaluation_is_exact``). ``NONE``: the search was not reached.
+    evaluates the single requested size (exact by definition). ``BOUNDED_EXACT`` starts from the
+    breakpoint candidates and evaluates every gap whose fee lower bound cannot rule it out, so
+    its optimum equals the exhaustive one. ``BREAKPOINT_APPROXIMATE`` (fallback when bounded
+    refinement would exceed its work limit, or fees cannot be estimated) evaluates only depth
+    breakpoints +/- a radius plus the endpoints: the optimum over the full domain is *not*
+    guaranteed (``optimal_quantity_is_exact`` is False; a negative finding adds reason
+    ``QUANTITY_SEARCH_APPROXIMATE``), although every figure reported at the chosen quantity is an
+    exact re-evaluation at that quantity (``reported_quantity_evaluation_is_exact``).
+    ``NONE``: the search was not reached.
     """
 
     quantity_step: Dec

@@ -178,13 +178,15 @@ def test_edge_gate_picks_best_qualifying_quantity() -> None:
 
 
 def test_breakpoint_search_agrees_with_exhaustive() -> None:
-    """Forcing the breakpoint method on the same book keeps the classification and the pre-fee
-    optimum (the pre-fee objective is piecewise linear with kinks only at breakpoints)."""
+    """Above the exhaustive limit the bounded search keeps the classification, the pre-fee
+    optimum (piecewise linear with kinks only at breakpoints) and the exact optimum."""
     full = run_a(fx=_thin_top_deep_book())
     bp = run_a(fx=_thin_top_deep_book(), config={"exhaustive_search_limit": 10})
     assert bp.certificate.capacity is not None and full.certificate.capacity is not None
-    assert bp.certificate.capacity.method == "BREAKPOINT_APPROXIMATE"
+    assert bp.certificate.capacity.method == "BOUNDED_EXACT"
+    assert bp.certificate.capacity.optimal_quantity_is_exact is True
     assert bp.certificate.capacity.points_evaluated < full.certificate.capacity.points_evaluated
+    assert bp.certificate.evaluation == full.certificate.evaluation
     assert bp.classification is full.classification
     assert (
         bp.certificate.capacity.best_gross_quantity == full.certificate.capacity.best_gross_quantity

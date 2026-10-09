@@ -26,14 +26,19 @@ Classification precedence (first failing step decides; exactly one primary statu
 Quantity domain: multiples of the basket step (lcm of the legs' quantity increments) from
 ``max(minimum_available_quantity, step)`` (or exactly ``target_quantity``) up to the maximum
 depth-supported basket. Domains up to ``exhaustive_search_limit`` points are searched
-exhaustively. Larger domains are searched at depth breakpoints (where any leg moves to its next
-price level) +/- 3 steps plus the endpoints: between breakpoints the pre-rounding objective is
-linear in the quantity, so its maximum lies at a breakpoint; only sub-cent rounding effects can
-differ, and the method is recorded in the certificate.
+exhaustively (``EXHAUSTIVE``). Larger domains start from depth breakpoints (where any leg moves
+to its next price level) +/- 3 steps plus the endpoints; the pre-fee objective is linear between
+breakpoints, so the best gross quantity is exact. Cent rounding of fees is not linear, so the
+gaps are then refined with a provable upper bound (unrounded model fee <= net fee): every gap
+that could hold a better or tying point is evaluated point by point (``BOUNDED_EXACT``, equal to
+exhaustive). If that needs more than ``BOUNDED_REFINEMENT_LIMIT`` points the result stays
+``BREAKPOINT_APPROXIMATE``: labelled inexact, negative findings carry
+QUANTITY_SEARCH_APPROXIMATE, and figures at the reported quantity are still exact.
 """
 
 from __future__ import annotations
 
+import itertools
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -44,7 +49,7 @@ from fractions import Fraction
 
 from consistency_core.fees.calculator import FeeCalculator, FeeResolution
 from consistency_core.fees.model import Role
-from consistency_core.fees.rounding import order_net_fee
+from consistency_core.fees.rounding import order_net_fee, order_net_fee_lower_bound
 from consistency_core.models.common import FrozenModel, MarketStatus, SyncStatus
 from consistency_core.models.detection import Classification, Detection, SnapshotRef
 from consistency_core.models.market import Market
@@ -82,6 +87,8 @@ from consistency_core.relationships.scenarios import ScenarioSpaceError
 from consistency_core.serialization import canonical_json, sha256_of
 
 BREAKPOINT_RADIUS = 3
+BOUNDED_REFINEMENT_LIMIT = 50_000
+"""Extra points the bounded exact search may evaluate before staying BREAKPOINT_APPROXIMATE."""
 EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
@@ -113,6 +120,7 @@ class Reason(StrEnum):
     DURATION_UNKNOWN = "DURATION_UNKNOWN"
     DURATION_BELOW_MINIMUM = "DURATION_BELOW_MINIMUM"
     NON_DEFAULT_MAKER_ASSUMPTION = "NON_DEFAULT_MAKER_ASSUMPTION"
+    QUANTITY_SEARCH_APPROXIMATE = "QUANTITY_SEARCH_APPROXIMATE"
 
 
 CHECKS: tuple[tuple[int, str, Classification], ...] = (
@@ -533,6 +541,16 @@ class _Evaluator:
         if all(f.can_estimate for f in res):
             self._compute_net()
             assert self.search is not None
+            if self.search.method == "BREAKPOINT_APPROXIMATE" and self._refine():
+                self.search = self.search.model_copy(
+                    update={
+                        "method": "BOUNDED_EXACT",
+                        "optimal_quantity_is_exact": True,
+                        "points_evaluated": len(self.points),
+                    }
+                )
+            else:
+                self.search = self.search.model_copy(update={"points_evaluated": len(self.points)})
             best = self._best_net()
             self.report = self._evaluate_quantity(best.q, fees=True)
         if unverified:
@@ -549,25 +567,113 @@ class _Evaluator:
 
     def _compute_net(self) -> None:
         for p in self.points:
-            fees = ZERO
-            fee_buffer = ZERO
-            slip = ZERO
-            for lg in self.legs:
-                need = p.q * lg.side_ratio
-                _, fills, _ = lg.fills(need)
-                assert lg.fee is not None
-                assert lg.fee.coefficient is not None
-                assert lg.fee.multiplier is not None
-                fees += order_net_fee(
-                    fills,
-                    coefficient=lg.fee.coefficient,
-                    multiplier=lg.fee.multiplier,
-                    precision=lg.fee.member_class.precision,
-                )
-                fee_buffer += self._fee_buffer(lg)
-                slip += need * self.cfg.assumed_extra_slippage_per_leg
-            p.net = p.gross - fees
-            p.exec_adj = p.net - slip - fee_buffer
+            self._net_point(p)
+
+    def _net_point(self, p: _Point) -> None:
+        fees = ZERO
+        fee_buffer = ZERO
+        slip = ZERO
+        for lg in self.legs:
+            need = p.q * lg.side_ratio
+            _, fills, _ = lg.fills(need)
+            assert lg.fee is not None
+            assert lg.fee.coefficient is not None
+            assert lg.fee.multiplier is not None
+            fees += order_net_fee(
+                fills,
+                coefficient=lg.fee.coefficient,
+                multiplier=lg.fee.multiplier,
+                precision=lg.fee.member_class.precision,
+            )
+            fee_buffer += self._fee_buffer(lg)
+            slip += need * self.cfg.assumed_extra_slippage_per_leg
+        p.net = p.gross - fees
+        p.exec_adj = p.net - slip - fee_buffer
+
+    def _upper_bounds(self, q: Decimal) -> tuple[Decimal, Decimal]:
+        """Upper bounds on (net, execution-adjusted) profit at ``q``, using the unrounded model
+        fee (``order_net_fee_lower_bound``). Linear in ``q`` between consecutive breakpoints."""
+        lb_fee = ZERO
+        fee_buffer = ZERO
+        slip = ZERO
+        for lg in self.legs:
+            need = q * lg.side_ratio
+            _, fills, _ = lg.fills(need)
+            assert lg.fee is not None
+            assert lg.fee.coefficient is not None
+            assert lg.fee.multiplier is not None
+            lb_fee += order_net_fee_lower_bound(
+                fills, coefficient=lg.fee.coefficient, multiplier=lg.fee.multiplier
+            )
+            fee_buffer += self._fee_buffer(lg)
+            slip += need * self.cfg.assumed_extra_slippage_per_leg
+        ub_net = self._gross(q) - lb_fee
+        return ub_net, ub_net - slip - fee_buffer
+
+    def _refine(self) -> bool:
+        """Bounded exact search over the gaps between breakpoint candidates.
+
+        Every leg's fills are linear in ``q`` strictly between consecutive candidates (the
+        candidate set contains floor and ceil of every breakpoint), so the upper bounds are
+        linear there and their maximum over a gap is at its end points. A gap is evaluated
+        point by point unless its bounds prove that no interior point can beat or tie (at a
+        smaller quantity) the current best net profit, extend the largest profitable quantity,
+        or beat the current edge-qualifying optimum (or, while none qualifies, the overall
+        execution-adjusted optimum). Returns False if more than ``BOUNDED_REFINEMENT_LIMIT``
+        points would be needed (the result then stays approximate)."""
+        known = {p.q: p for p in self.points}
+        added = 0
+        edge = self.cfg.minimum_net_edge
+
+        def key_net(p: _Point) -> tuple[Decimal, Decimal]:
+            assert p.net is not None
+            return p.net, -p.q
+
+        def key_exec(p: _Point) -> tuple[Decimal, Decimal]:
+            assert p.exec_adj is not None
+            return p.exec_adj, -p.q
+
+        def beats(ub: Decimal, lo: Decimal, best: _Point, value: Decimal | None) -> bool:
+            assert value is not None
+            return ub > value or (ub == value and lo < best.q)
+
+        while True:
+            pts = sorted(known.values(), key=lambda p: p.q)
+            best_net = max(pts, key=key_net)
+            profitable = [p.q for p in pts if p.net is not None and p.net > ZERO]
+            max_prof = max(profitable) if profitable else None
+            qual = [p for p in pts if p.exec_adj is not None and p.exec_adj >= edge * p.q]
+            best_qual = max(qual, key=key_exec) if qual else None
+            best_all = max(pts, key=key_exec)
+            todo: tuple[Decimal, Decimal, Decimal] | None = None
+            for a, b in itertools.pairwise(pts):
+                lo, hi = a.q + self.step, b.q - self.step
+                if lo > hi:
+                    continue
+                (un_lo, ue_lo), (un_hi, ue_hi) = self._upper_bounds(lo), self._upper_bounds(hi)
+                un, ue = max(un_lo, un_hi), max(ue_lo, ue_hi)
+                need = beats(un, lo, best_net, best_net.net)
+                need = need or (un > ZERO and (max_prof is None or hi > max_prof))
+                if max(ue_lo - edge * lo, ue_hi - edge * hi) >= ZERO:
+                    need = need or best_qual is None or beats(ue, lo, best_qual, best_qual.exec_adj)
+                if best_qual is None:
+                    need = need or beats(ue, lo, best_all, best_all.exec_adj)
+                if need and (todo is None or ue > todo[0]):
+                    todo = (ue, lo, hi)
+            if todo is None:
+                self.points = pts
+                return True
+            _, lo, hi = todo
+            count = int((hi - lo) / self.step) + 1
+            if added + count > BOUNDED_REFINEMENT_LIMIT:
+                self.points = pts
+                return False
+            for k in range(count):
+                q = lo + k * self.step
+                p = _Point(q=q, gross=self._gross(q))
+                self._net_point(p)
+                known[q] = p
+            added += count
 
     def _fee_buffer(self, lg: _Leg) -> Decimal:
         if self.cfg.fee_buffer_per_leg is not None:
@@ -592,7 +698,14 @@ class _Evaluator:
         assert best.net is not None
         self._note(f"best worst-case profit after fees {dec_str(best.net)} at {dec_str(best.q)}")
         if best.net <= ZERO:
-            return [Reason.FEES_EXCEED_EDGE]
+            return [Reason.FEES_EXCEED_EDGE, *self._approximate_reason()]
+        return []
+
+    def _approximate_reason(self) -> list[str]:
+        """A negative finding from an approximate search may be a false negative."""
+        assert self.search is not None
+        if self.search.method == "BREAKPOINT_APPROXIMATE":
+            return [Reason.QUANTITY_SEARCH_APPROXIMATE]
         return []
 
     def _s10_gates(self) -> list[str]:
@@ -614,6 +727,7 @@ class _Evaluator:
         required = self.cfg.minimum_net_edge * best.q
         if not qualifying:
             r.append(Reason.EDGE_BELOW_MINIMUM)
+            r.extend(self._approximate_reason())
         if self.duration is None:
             r.append(Reason.DURATION_UNKNOWN)
         elif self.duration < self.cfg.minimum_candidate_duration_ms:
