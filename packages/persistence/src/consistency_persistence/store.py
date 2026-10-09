@@ -101,6 +101,9 @@ class PersistenceStore:
     ) -> OpenedPersistence:
         versions = _versions(catalog, relationships, fees)
         config_id = sha256_of(config_document)
+        market_metadata_version = sha256_of(
+            [market.model_dump(mode="json") for market in catalog.markets]
+        )
         async with self.sessions() as session, session.begin():
             await upsert_data_source(
                 session, data_source_id=source_kind, name=source_label, kind=source_kind
@@ -110,6 +113,28 @@ class PersistenceStore:
             await upsert_fee_schedules(session, list(fees.registry.schedules))
             await upsert_configuration(
                 session, version_id=config_id, kind="session-config", document=config_document
+            )
+            await upsert_configuration(
+                session,
+                version_id=versions.relationship_version,
+                kind="relationships",
+                document={
+                    "relationships": [item.model_dump(mode="json") for item in relationships]
+                },
+            )
+            await upsert_configuration(
+                session,
+                version_id=versions.fee_schedule_version,
+                kind="fee-schedules",
+                document={
+                    "schedules": [item.model_dump(mode="json") for item in fees.registry.schedules]
+                },
+            )
+            await upsert_configuration(
+                session,
+                version_id=market_metadata_version,
+                kind="market-metadata",
+                document={"markets": [item.model_dump(mode="json") for item in catalog.markets]},
             )
             session_id, resume = await _allocate(
                 session,
@@ -121,6 +146,16 @@ class PersistenceStore:
                 pinned=pinned,
                 persist_raw=persist_raw,
                 config_version_id=config_id,
+            )
+            await upsert_configuration(
+                session,
+                version_id=f"session-reference:{session_id}",
+                kind="session-reference",
+                document={
+                    "market_metadata_version": market_metadata_version,
+                    "relationship_version": versions.relationship_version,
+                    "fee_schedule_version": versions.fee_schedule_version,
+                },
             )
             session.add(
                 SystemHealthRow(

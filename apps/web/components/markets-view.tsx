@@ -7,10 +7,10 @@ import { PollStatus, usePolled } from "@/components/polling";
 import type { MarketListItem } from "@/lib/types";
 
 export function MarketsView({ initial }: { initial: { markets: MarketListItem[] } }) {
-  const { data, error } = usePolled<{ markets: MarketListItem[] }>("/markets", initial);
+  const { data, error, status } = usePolled<{ markets: MarketListItem[] }>("/markets", initial);
   return (
     <div className="space-y-4">
-      <PollStatus error={error} />
+      <PollStatus error={error} status={status} />
       <h1 className="text-xl font-medium">Markets</h1>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[880px] text-left text-sm">

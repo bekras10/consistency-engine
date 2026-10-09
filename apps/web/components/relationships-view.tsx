@@ -15,13 +15,13 @@ export function RelationshipsView({
   initial: RelationshipList;
   filters: Record<string, string>;
 }) {
-  const { data, error } = usePolled<RelationshipList>(
+  const { data, error, status } = usePolled<RelationshipList>(
     `/relationships${queryString(filters)}`,
     initial,
   );
   return (
     <div className="space-y-4">
-      <PollStatus error={error} />
+      <PollStatus error={error} status={status} />
       <h1 className="text-xl font-medium">Relationships</h1>
       <form data-testid="relationship-filter" className="grid gap-2 md:grid-cols-6" action="/relationships">
         <select name="type" defaultValue={filters.type} className="h-8 rounded-md border border-[#3a4046] bg-[#101214] px-2 text-sm" aria-label="Type">

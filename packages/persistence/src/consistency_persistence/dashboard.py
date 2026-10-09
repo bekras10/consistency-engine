@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from consistency_connectors.ingestion import BookManager
 from consistency_core.models.common import Side
 from consistency_core.money import dec_str
+from consistency_persistence.depth_chart import depth_chart_points
 from consistency_persistence.schema import (
     DataSourceRow,
     DetectionLegRow,
@@ -321,13 +322,16 @@ def book_view(manager: BookManager, market_id: str) -> dict[str, object]:
     spread = None
     if yes_bid is not None and yes_ask is not None:
         spread = dec_str(Decimal(yes_ask) - Decimal(yes_bid))
+    yes_bids = _levels(book.yes_bids)
+    yes_asks = _levels(book.yes_asks)
     return {
         "market_id": market_id,
         "sync_status": book.sync_status.value,
-        "yes_bids": _levels(book.yes_bids),
+        "yes_bids": yes_bids,
         "no_bids": _levels(book.no_bids),
-        "yes_asks": _levels(book.yes_asks),
+        "yes_asks": yes_asks,
         "no_asks": _levels(book.no_asks),
+        "depth_chart": depth_chart_points(yes_bids, yes_asks),
         "best_yes_bid": yes_bid,
         "best_yes_ask": yes_ask,
         "best_no_bid": best(Side.NO, False),
@@ -342,6 +346,20 @@ def book_view(manager: BookManager, market_id: str) -> dict[str, object]:
             "the same derivation the engine uses. They are not a separate stored ask feed."
         ),
     }
+
+
+def apply_journal_market(item: dict[str, object], manager: BookManager | None) -> None:
+    """Attach the reconstructed book and the journal's current market status.
+
+    The markets table keeps the status from the catalog write. A later
+    ``market_status`` journal entry lives on the book manager.
+    """
+    market_id = item.get("market_id")
+    if not isinstance(market_id, str) or manager is None or not manager.has_market(market_id):
+        item["book"] = None
+        return
+    item["book"] = book_view(manager, market_id)
+    item["status"] = manager.market_status(market_id).value
 
 
 def sync_summary(manager: BookManager) -> dict[str, object]:

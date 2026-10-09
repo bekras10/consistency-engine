@@ -21,6 +21,10 @@ export type BookView = {
   received_ts_ms: number;
   source_sequence: number | null;
   depth_note: string;
+  depth_chart?: {
+    bids: { price: string; cumulative: string }[];
+    asks: { price: string; cumulative: string }[];
+  };
 };
 
 export type DetectionRow = {

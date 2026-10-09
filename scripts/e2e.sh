@@ -5,6 +5,8 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
+export PYTHONPATH="packages/core/src:packages/simulation/src:packages/connectors/src:packages/pipeline/src:packages/persistence/src:apps/api/src:apps/worker/src${PYTHONPATH:+:$PYTHONPATH}"
+
 port="${POSTGRES_PORT:-5432}"
 export POSTGRES_PORT="$port"
 export DATABASE_URL="${DATABASE_URL:-postgresql+asyncpg://consistency:consistency@127.0.0.1:${port}/consistency}"
@@ -41,10 +43,16 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 
-npm --prefix apps/web exec playwright test e2e/dashboard.spec.ts
+(
+  cd apps/web
+  npm exec playwright test e2e/dashboard.spec.ts
+)
 # Stop only the gateway so the next request observes a real disconnect.
 kill "${pids[0]}"
 pids=("${pids[1]}")
 sleep 1
-npm --prefix apps/web exec playwright test e2e/disconnected.spec.ts
+(
+  cd apps/web
+  npm exec playwright test e2e/disconnected.spec.ts
+)
 echo "Playwright passed, including the disconnected page."

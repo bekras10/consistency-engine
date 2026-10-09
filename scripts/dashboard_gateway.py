@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from consistency_persistence.dashboard import (
     DetectionQuery,
+    apply_journal_market,
     book_view,
     get_detection,
     get_market_row,
@@ -247,15 +248,10 @@ async def markets(request: Request) -> JSONResponse:
         async with sessions() as session:
             payload = await list_markets(session)
         listed = payload.get("markets")
-        if manager is not None and isinstance(listed, list):
+        if isinstance(listed, list):
             for item in listed:
-                if not isinstance(item, dict):
-                    continue
-                market_id = item.get("market_id")
-                if isinstance(market_id, str) and manager.has_market(market_id):
-                    item["book"] = book_view(manager, market_id)
-                else:
-                    item["book"] = None
+                if isinstance(item, dict):
+                    apply_journal_market(item, manager)
         return payload
 
     return await _run(request, handler)
@@ -272,10 +268,7 @@ async def market(request: Request, market_id: str) -> JSONResponse:
             manager = await request.app.state.books.refresh(sessions)
         except Exception:
             manager = None
-        if manager is not None and manager.has_market(market_id):
-            row["book"] = book_view(manager, market_id)
-        else:
-            row["book"] = None
+        apply_journal_market(row, manager)
         return row
 
     return await _run(request, handler)

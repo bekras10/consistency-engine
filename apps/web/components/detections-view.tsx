@@ -14,10 +14,10 @@ export function DetectionsView({
   initial: DetectionList;
   filters: Record<string, string>;
 }) {
-  const { data, error } = usePolled<DetectionList>(`/detections${queryString(filters)}`, initial);
+  const { data, error, status } = usePolled<DetectionList>(`/detections${queryString(filters)}`, initial);
   return (
     <div className="space-y-4">
-      <PollStatus error={error} />
+      <PollStatus error={error} status={status} />
       <h1 className="text-xl font-medium">Detections</h1>
       <p className="text-xs text-[#9aa0a6]">
         Net edge is the current quote. The maximum is shown on its own line and is not used as the current edge.

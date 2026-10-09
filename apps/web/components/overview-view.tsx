@@ -19,12 +19,12 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 export function OverviewView({ initial }: { initial: Overview }) {
-  const { data, error } = usePolled<Overview>("/overview", initial);
+  const { data, error, status } = usePolled<Overview>("/overview", initial);
   const latency = data.internal_latency_ns;
   const sync = data.sync_health;
   return (
     <div className="space-y-4" data-testid="overview">
-      <PollStatus error={error} />
+      <PollStatus error={error} status={status} />
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-medium">Overview</h1>

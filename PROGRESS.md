@@ -513,11 +513,29 @@ typecheck, Vitest, and `next build`. It does not start Postgres plus Next plus C
 
 - Public `/api/v1/markets`, `/api/v1/detections`, `/api/v1/stream`, and the other versioned
   catalog and replay routes. Replay stays on the internal gateway.
-- SSE or WebSocket. The UI polls and says so.
+- SSE or WebSocket. The UI polls and says so. A failed poll keeps the last successful payload
+  and reports stale or error instead of reverting to the first server render.
 - The `notification_outbox` table, with commit-order safety as written in `docs/architecture.md`.
 - `make benchmark` and deployment images.
 - Market depth on a detection page is the latest journal book, not the book at first observation.
   Replay is the cursor-accurate book.
+
+## Phase 10 correctness — 2026-10-09
+
+Regression first, confirmed failing, then the fix. Existing golden expectations were not edited.
+Added `fixtures/golden/depth-multilevel.yaml` and `tests/golden/test_depth_chart.py`.
+
+| Issue | Regression | Pre-fix failure | Fix |
+|---|---|---|---|
+| Depth chart | `test_multilevel_depth_chart_cumulative_quantities`; `lib/depth.test.ts` | bids summed low to high (`0.60` cumulative `36.75` instead of `10.00`); chart labels padded `0.40` to `0.4000` | bids accumulate high→low, asks low→high; displayed prices stay the input strings; integer scale is geometry only |
+| BookTail rollback | `test_book_tail_rebuilds_after_same_session_truncate_and_replay`; `test_book_tail_rebuilds_when_cached_ordinal_entry_changes` | after truncate/replay the cache stayed at quantity `40` (fresh replay was `3`); a replaced tip stayed at `20` instead of `11` | if the cached ordinal is gone or its entry no longer matches, rebuild from the latest checkpoint that still anchors a journal row, then reapply |
+| Historical replay | `test_replay_pins_recorded_reference_versions` | after reference edits, replay digest changed and detection events were empty | session open stores content-addressed market, relationship, and fee snapshots; replay loads those versions (journal stamps for relationship and fee) |
+| Polling recovery | `lib/poll.test.ts` keeps the last successful poll | error envelope replaced the payload with `initial` | `reducePoll` keeps the last success and sets status `stale` (or `error` when nothing succeeded) |
+| Market status | `test_market_status_follows_journal_after_catalog_row` | markets page status stayed `closed` (the catalog column) after the journal moved the market to `paused` | `apply_journal_market` copies `BookManager.market_status` onto the list and the detail |
+
+`scripts/e2e.sh` exports `PYTHONPATH` and runs Playwright from `apps/web` so the config's base URL is loaded.
+
+Verification on this machine (Docker `postgres:16.15`, host port 5433): `make lint` clean, `make typecheck` clean (83 source files). `make test` 388 passed, 0 failed, 0 skipped. Suites: unit 307, golden 34, property 24, replay 11, integration 12. Frontend: eslint clean, `tsc --noEmit` clean, Vitest 6 passed, `next build` succeeded. `scripts/e2e.sh`: dashboard spec 1 passed, disconnected spec 1 passed.
 
 ## How to resume Phase 11
 

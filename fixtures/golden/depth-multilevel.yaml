@@ -1,0 +1,23 @@
+description: >
+  Multi-level depth chart. YES bids accumulate from the highest price to the
+  lowest (quantity available at that price or better). YES asks accumulate from
+  the lowest price to the highest. Displayed prices stay the original
+  fixed-point strings; an integer scale is only for chart geometry.
+bids:
+  - {price: "0.40", quantity: "5.00"}
+  - {price: "0.60", quantity: "10.00"}
+  - {price: "0.55", quantity: "20.50"}
+  - {price: "0.3333", quantity: "1.25"}
+asks:
+  - {price: "0.80", quantity: "4.00"}
+  - {price: "0.62", quantity: "8.00"}
+  - {price: "0.70", quantity: "12.25"}
+bids_cumulative:
+  "0.60": "10.00"
+  "0.55": "30.50"
+  "0.40": "35.50"
+  "0.3333": "36.75"
+asks_cumulative:
+  "0.62": "8.00"
+  "0.70": "20.25"
+  "0.80": "24.25"

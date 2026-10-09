@@ -10,7 +10,7 @@ import asyncio
 from decimal import Decimal
 from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from consistency_connectors.ingestion import BookManager
@@ -18,9 +18,10 @@ from consistency_core.fees import FeeCalculator, FeeSchedule, FeeScheduleRegistr
 from consistency_core.models.market import Market
 from consistency_core.models.relationship import Relationship
 from consistency_core.money import dec_str
+from consistency_core.serialization import canonical_json
 from consistency_persistence.dashboard import apply_book, book_view, current_figures, sync_summary
-from consistency_persistence.recording import latest_checkpoint
 from consistency_persistence.schema import (
+    ConfigurationVersionRow,
     FeeScheduleRow,
     IngestionSessionRow,
     MarketRow,
@@ -33,8 +34,18 @@ from consistency_pipeline.journal import JournalEntry
 from consistency_pipeline.playback import PlaybackService, PlaybackSession
 
 
+def _entry_token(entry: JournalEntry) -> str:
+    return canonical_json(entry.model_dump(mode="json"))
+
+
 class BookTail:
-    """Latest session's books, advanced from the last checkpoint plus new ordinals."""
+    """Latest session's books, advanced from the last checkpoint plus new ordinals.
+
+    A deterministic restart truncates the journal and replays it under the same
+    session id. The cache treats that as a rollback when the applied ordinal
+    disappears or the entry stored there no longer matches, then rebuilds from
+    the latest checkpoint that still agrees with the journal.
+    """
 
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
@@ -42,6 +53,7 @@ class BookTail:
         self.manager: BookManager | None = None
         self.ordinal = -1
         self.source_label: str | None = None
+        self._entry_token: str | None = None
 
     async def refresh(self, sessions: async_sessionmaker[AsyncSession]) -> BookManager | None:
         async with self._lock:
@@ -54,31 +66,64 @@ class BookTail:
                     )
                 ).scalar_one_or_none()
                 if latest is None or not latest.raw_persisted:
-                    self.session_id = None
-                    self.manager = None
-                    self.ordinal = -1
+                    self._clear()
                     return None
-                if self.session_id != latest.session_id or self.manager is None:
-                    checkpoint = await latest_checkpoint(session, latest.session_id)
-                    if checkpoint is None:
-                        markets = [
-                            Market.model_validate(row.document)
-                            for row in (await session.execute(select(MarketRow))).scalars()
-                        ]
-                        self.manager = BookManager(markets, source=latest.source_label)
-                        self.ordinal = -1
-                    else:
-                        state = cast(dict[str, Any], dict(checkpoint.manager_state))
-                        self.manager = BookManager.from_state(state)
-                        self.ordinal = checkpoint.ordinal
-                    self.session_id = latest.session_id
-                    self.source_label = latest.source_label
+                rebuild = self.session_id != latest.session_id or self.manager is None
+                ceiling: int | None = None
+                if not rebuild and self.ordinal >= 0:
+                    current = await _entry_at(session, latest.session_id, self.ordinal)
+                    if current is None:
+                        rebuild = True
+                        ceiling = await _max_ordinal(session, latest.session_id)
+                    elif _entry_token(current) != self._entry_token:
+                        rebuild = True
+                        ceiling = self.ordinal - 1
+                if rebuild:
+                    await self._install(session, latest, ceiling)
                 entries = await _entries_after(session, latest.session_id, self.ordinal)
             assert self.manager is not None
             for entry in entries:
                 apply_book(self.manager, entry)
                 self.ordinal = entry.ordinal
+                self._entry_token = _entry_token(entry)
             return self.manager
+
+    def _clear(self) -> None:
+        self.session_id = None
+        self.manager = None
+        self.ordinal = -1
+        self.source_label = None
+        self._entry_token = None
+
+    async def _install(
+        self, session: AsyncSession, latest: IngestionSessionRow, ceiling: int | None
+    ) -> None:
+        max_ordinal = await _max_ordinal(session, latest.session_id)
+        limit = max_ordinal if ceiling is None else min(ceiling, max_ordinal)
+        checkpoint = await _checkpoint_at_most(session, latest.session_id, limit)
+        while checkpoint is not None and checkpoint.ordinal >= 0:
+            anchored = await _entry_at(session, latest.session_id, checkpoint.ordinal)
+            if anchored is not None:
+                break
+            checkpoint = await _checkpoint_at_most(
+                session, latest.session_id, checkpoint.ordinal - 1
+            )
+        if checkpoint is None:
+            markets = [
+                Market.model_validate(row.document)
+                for row in (await session.execute(select(MarketRow))).scalars()
+            ]
+            self.manager = BookManager(markets, source=latest.source_label)
+            self.ordinal = -1
+            self._entry_token = None
+        else:
+            state = cast(dict[str, Any], dict(checkpoint.manager_state))
+            self.manager = BookManager.from_state(state)
+            self.ordinal = checkpoint.ordinal
+            anchored = await _entry_at(session, latest.session_id, checkpoint.ordinal)
+            self._entry_token = None if anchored is None else _entry_token(anchored)
+        self.session_id = latest.session_id
+        self.source_label = latest.source_label
 
     def summary(self) -> dict[str, object] | None:
         if self.manager is None:
@@ -88,6 +133,55 @@ class BookTail:
         body["ordinal"] = self.ordinal
         body["source_label"] = self.source_label
         return body
+
+
+async def _max_ordinal(session: AsyncSession, session_id: str) -> int:
+    row = (
+        await session.execute(
+            select(func.max(OrderbookUpdateRow.ordinal)).where(
+                OrderbookUpdateRow.session_id == session_id
+            )
+        )
+    ).one()
+    raw = cast(object, row[0])
+    if not isinstance(raw, int):
+        return -1
+    return raw
+
+
+async def _entry_at(session: AsyncSession, session_id: str, ordinal: int) -> JournalEntry | None:
+    payload = (
+        await session.execute(
+            select(OrderbookUpdateRow.entry_json).where(
+                OrderbookUpdateRow.session_id == session_id,
+                OrderbookUpdateRow.ordinal == ordinal,
+            )
+        )
+    ).scalar_one_or_none()
+    if payload is None:
+        return None
+    return JournalEntry.model_validate(payload)
+
+
+async def _checkpoint_at_most(
+    session: AsyncSession, session_id: str, ordinal: int
+) -> Checkpoint | None:
+    if ordinal < 0:
+        return None
+    payload = (
+        await session.execute(
+            select(SessionCheckpointRow.checkpoint_json)
+            .where(
+                SessionCheckpointRow.session_id == session_id,
+                SessionCheckpointRow.ordinal <= ordinal,
+            )
+            .order_by(SessionCheckpointRow.ordinal.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if payload is None:
+        return None
+    return Checkpoint.model_validate(payload)
 
 
 async def _entries_after(
@@ -106,24 +200,89 @@ async def _entries_after(
     return [JournalEntry.model_validate(payload) for payload in rows]
 
 
+def _snapshot_list(document: object, key: str) -> list[object] | None:
+    if not isinstance(document, dict):
+        return None
+    raw = document.get(key)
+    if not isinstance(raw, list):
+        return None
+    return list(raw)
+
+
+async def _pinned_reference(
+    session: AsyncSession, replay_id: str
+) -> tuple[list[Market], list[Relationship], list[FeeSchedule]] | None:
+    """Markets, relationships, and fees at the versions recorded with the session.
+
+    Journal rows store ``relationship_version`` and ``fee_schedule_version``.
+    The session-reference configuration row stores the market metadata version,
+    which is not a journal column. Documents are content-addressed, so a later
+    edit of the current catalog does not change a recorded session.
+    """
+    ref = await session.get(ConfigurationVersionRow, f"session-reference:{replay_id}")
+    if ref is None or ref.kind != "session-reference":
+        return None
+    body = ref.document
+    market_version = body.get("market_metadata_version")
+    relationship_version = body.get("relationship_version")
+    fee_version = body.get("fee_schedule_version")
+    stamp = (
+        await session.execute(
+            select(
+                OrderbookUpdateRow.relationship_version,
+                OrderbookUpdateRow.fee_schedule_version,
+            )
+            .where(OrderbookUpdateRow.session_id == replay_id)
+            .order_by(OrderbookUpdateRow.ordinal)
+            .limit(1)
+        )
+    ).first()
+    if stamp is not None:
+        relationship_version = stamp[0]
+        fee_version = stamp[1]
+    if not isinstance(market_version, str):
+        return None
+    if not isinstance(relationship_version, str) or not isinstance(fee_version, str):
+        return None
+    markets_row = await session.get(ConfigurationVersionRow, market_version)
+    relationships_row = await session.get(ConfigurationVersionRow, relationship_version)
+    fees_row = await session.get(ConfigurationVersionRow, fee_version)
+    if markets_row is None or relationships_row is None or fees_row is None:
+        return None
+    market_items = _snapshot_list(markets_row.document, "markets")
+    relationship_items = _snapshot_list(relationships_row.document, "relationships")
+    fee_items = _snapshot_list(fees_row.document, "schedules")
+    if market_items is None or relationship_items is None or fee_items is None:
+        return None
+    return (
+        [Market.model_validate(item) for item in market_items],
+        [Relationship.model_validate(item) for item in relationship_items],
+        [FeeSchedule.model_validate(item) for item in fee_items],
+    )
+
+
 async def _load_playback(session: AsyncSession, replay_id: str) -> PlaybackSession:
     ingestion = await session.get(IngestionSessionRow, replay_id)
     if ingestion is None:
         raise KeyError(replay_id)
     if not ingestion.raw_persisted:
         raise ValueError("session has no stored journal")
-    markets = [
-        Market.model_validate(row.document)
-        for row in (await session.execute(select(MarketRow))).scalars()
-    ]
-    relationships = [
-        Relationship.model_validate(row.document)
-        for row in (await session.execute(select(RelationshipRow))).scalars()
-    ]
-    schedules = [
-        FeeSchedule.model_validate(row.document)
-        for row in (await session.execute(select(FeeScheduleRow))).scalars()
-    ]
+    pinned = await _pinned_reference(session, replay_id)
+    if pinned is None:
+        markets = [
+            Market.model_validate(row.document)
+            for row in (await session.execute(select(MarketRow))).scalars()
+        ]
+        relationships = [
+            Relationship.model_validate(row.document)
+            for row in (await session.execute(select(RelationshipRow))).scalars()
+        ]
+        schedules = [
+            FeeSchedule.model_validate(row.document)
+            for row in (await session.execute(select(FeeScheduleRow))).scalars()
+        ]
+    else:
+        markets, relationships, schedules = pinned
     entries = await _entries_after(session, replay_id, -1)
     checkpoints = [
         Checkpoint.model_validate(payload)
