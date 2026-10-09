@@ -16,7 +16,7 @@ implementation plan, per-phase log, decisions, and known limitations.
 | Milestone | Spec phases | Deliverable |
 |---|---|---|
 | **1 (this)** | 1–6 | bootstrap; Decimal domain models + normalization; synthetic exchange + datasets; ingestion core (sources, book manager, queues); relationship engine; pricing/portfolio/fee engine + certificates; golden fixtures A–J; property invariants 1–10 |
-| 2 | 7–9 | detection pipeline (incremental scans, lifecycle, dedupe), PostgreSQL schema + Alembic, recording + replay processor |
+| 2 | 7–9 | detection pipeline, PostgreSQL + Alembic, recording and replay (done) |
 | 3 | 10–12 | REST/SSE APIs with contract tests, Next.js dashboard, visual replay, Playwright |
 | 4 | 13–17 | benchmarks, reliability/security hardening, Docker deployment, README/demo, authorized Kalshi connector with offline contract tests |
 
@@ -294,10 +294,95 @@ files), `make test` 309 passed / 0 failed / 0 skipped; unit 252, golden 33, prop
 `tests/unit tests/golden tests/replay` 285 passed.
 
 Remaining limitations: the `BREAKPOINT_APPROXIMATE` fallback can still miss optima on very large
-domains (labelled); `max_future_ms` is a constructor parameter, not yet a `Settings` value; the
-runner stops (FAILED) rather than reconnecting on a live end-of-stream; review ids exist only on
-records created after this pass (older `ReviewRecord`s carry `review_id = null`, the id remains
-in `source`).
+domains (labelled); `max_future_ms` is a constructor parameter, not yet a `Settings` value; review
+ids exist only on records created after this pass (older `ReviewRecord`s carry `review_id = null`,
+the id remains in `source`). Live end-of-stream reconnect is implemented in Phase 7 (below), which
+supersedes the "runner stops rather than reconnecting" note.
+
+### Phase 7 — real-time detection pipeline ✅
+
+Committed earlier as `d678122` ("startedp phase 7"). Not rewritten in the persistence pass.
+In-memory journal and detections until Phase 8.
+
+- `DetectionEngine` keeps a market→relationship index (verified legs, and every member for
+  invalidation). A book update evaluates only the relationships that contain that market.
+  Pricing and certificates stay in `consistency_core.pricing.evaluator.evaluate`.
+- Lifecycle `OPEN` / `UPDATED` / `EXPIRED` / `RESOLVED` / `INVALIDATED`. Consecutive signals for
+  the same relationship and portfolio direction merge. Tracked fields: first/last observed, max
+  deviation, max capacity, max net edge, status, expiration reason. Duration matches
+  `minimum_candidate_duration_ms` (continuous local-clock streak, swept at 100 ms). An unchanged
+  re-evaluation writes no row and no event.
+- A constituent book that becomes `UNSYNCHRONIZED`, stale, or interrupted invalidates open
+  detections immediately, including desync notifications the runner already publishes. Withdrawing
+  a review does the same.
+- Timing (spec §4.5): source latency is `received_at − exchange_time`; internal latency is
+  `detection_completed_ns − processing_started_ns`. Those two nanosecond fields are telemetry.
+- `apps/worker` is a long-running asyncio service. `DATA_SOURCE=synthetic` by default; `replay`
+  is supported; `kalshi_authorized` stays refused. Bounded queues, JSON logs, graceful shutdown.
+  On a live end-of-stream the supervisor reconnects with backoff. Books stay fail-closed until a
+  fresh snapshot; reconnect does not pretend recovery.
+- Audit P2 (`request_recovery()` failures fail closed) was already committed at `679af2a`,
+  before this continuation. Pre-fix, an exception from `request_recovery()` escaped
+  `IngestionRunner.run()` and no `RECOVERY_FAILED` desync was published; a recovery that never
+  returned hung `run()` until cancellation. The regression tests are
+  `tests/unit/test_recovery_failure.py`.
+
+### Phase 8 — PostgreSQL ✅
+
+- SQLAlchemy 2.x + Alembic revision `0001_initial` in `migrations/`. Tables: `data_sources`,
+  `series`, `events`, `markets`, `market_rules`, `market_price_ranges`, `relationships`,
+  `relationship_members`, `relationship_reviews`, `fee_schedules`, `ingestion_sessions`,
+  `orderbook_snapshots`, `orderbook_updates`, `detections`, `detection_legs`,
+  `detection_scenarios`, `replay_sessions`, `system_health`, `configuration_versions`, plus
+  `session_checkpoints` (spec §12.2; not in the §11 list).
+- Indexes include `ix_markets_ticker`, `ix_events_ticker`, `ix_relationship_members_market`,
+  `ix_detections_classification`, `ix_detections_first_observed`, `ix_detections_last_observed`,
+  `ix_detections_session`, `ix_orderbook_snapshots_lookup`, unique
+  `ix_orderbook_snapshots_order` and `ix_orderbook_updates_replay_order` on
+  `(session_id, ordinal)`, `ix_orderbook_updates_session_sequence`,
+  `ix_ingestion_sessions_fingerprint`, `ix_system_health_checked`.
+- Money is `NUMERIC`. Timestamps are `timestamptz`. Certificate v2 JSON is stored with its hash.
+  A detection, its legs, its scenarios, and its certificate commit in one transaction.
+  High-frequency book rows batch (`JOURNAL_BATCH_SIZE`, default 500).
+- Driver is asyncpg. `consistency_persistence` is the only repository. The worker adapts it in
+  `apps/worker/.../store.py`; the API readiness check pings the same engine. SQLite URLs are
+  refused.
+- `make seed` loads the bundled inconsistent catalog, relationships, manual reviews, and fee
+  schedules. Dataset regeneration moved to `make datasets` (CI still calls
+  `scripts/generate_datasets.py --bundled --check` directly).
+- Retention: pinned labels `synthetic:inconsistent` and `replay:inconsistent` keep raw rows.
+  Other synthetic/replay sessions drop raw data after `RETENTION_MAX_AGE_HOURS` (168) and keep
+  at most `RETENTION_MAX_SESSIONS` (20) newer sessions. Third-party raw data is off unless
+  `THIRD_PARTY_RAW_PERSISTENCE_AUTHORIZED=true`, and `RETENTION_THIRD_PARTY_HOURS` defaults to 0.
+  Documented in docs/compliance.md.
+- Restart: a deterministic session resumes from the last checkpoint on the same id. Journal rows
+  and detections past that checkpoint are reconciled. Open detections are not duplicated.
+- CI runs `alembic upgrade head`, `downgrade base`, `upgrade head` against a `postgres:16`
+  service, then `pytest tests/integration`. `DATABASE_URL` is set only on those steps.
+
+### Phase 9 — recording and replay ✅
+
+- The journal records snapshots, deltas, sequence metadata, exchange and receipt timestamps,
+  market-metadata versions, fee-schedule versions, and relationship/rule versions. Replay order
+  is the journal ordinal (docs/data-contracts.md). Wall-clock telemetry is excluded from equality.
+- `consistency_pipeline.replay` restores the latest checkpoint at or before a timestamp, reapplies
+  later ordinals, rebuilds books, recalculates detections, and diffs them.
+- `PlaybackService` (the API Phase 11 will call): start, pause, resume, restart, step, seek,
+  speeds 0.5 / 1 / 2 / 5 / 10. Each replay id has its own books and engine.
+- `make replay` replays `fixtures/datasets/inconsistent` twice and prints the comparison, then
+  checks seek-via-checkpoint against a prefix replay and prints S1–S8.
+- `tests/replay/test_determinism.py`: the same recording twice matches books, classifications,
+  certificate hashes, and event order; seek via checkpoint matches replay-from-start.
+- `tests/integration/test_postgres_pipeline.py` runs the bundled inconsistent dataset through
+  the worker and Postgres and checks S1–S8. The Test I loop in `tests/golden/replay_support.py`
+  remains as the golden reference; the integration test is the production path.
+
+Verification on this machine (Docker `postgres:16.15`, host port 5433 because 5432 is already
+PostgreSQL 17): `make lint` clean, `make typecheck` clean (80 files), `make test` 368 passed.
+Subsets: unit 296, golden 33, property 24, replay 8, integration 7. `alembic upgrade head` /
+`downgrade base` / `upgrade head` succeeded. `make seed` loaded 27 markets, 15 relationships,
+3 reviews, 2 fee schedules. `make replay` reported IDENTICAL books, classifications, certificate
+hashes, and event order (63 events), and seek-via-checkpoint IDENTICAL.
 
 ## Deviations from the specification
 
@@ -320,15 +405,33 @@ in `source`).
 - No spec number had to be changed: every golden expectation in the spec (A $0.35, B $0.10,
   C rejected, D not 10, E/F/G/H/I/J behaviours) is asserted as written.
 
-## Known limitations (milestone 1)
+## Known limitations (after Phase 9)
 
-- No detection pipeline, persistence, API beyond health, or frontend (milestones 2–3). The
-  Test I scan loop lives in `tests/golden/replay_support.py` and is not production code.
+- No dashboard (Phase 10) and no public REST or SSE API (Phase 11). Health live/ready exist;
+  readiness returns 503 `database_unavailable` when `DATABASE_URL` is set and Postgres is down.
+- `make dev` starts Postgres, applies migrations, and runs the worker. It prints that the
+  frontend is not started. `make build` and `make benchmark` still exit 2.
 - Large-domain search is exact (`BOUNDED_EXACT`) unless refinement would exceed 50 000 extra
   points; it then falls back to a labelled `BREAKPOINT_APPROXIMATE` result that can miss optima
   (measured rates in the hardening section). Exhaustive search is used for all bundled fixtures.
+- `max_future_ms` is a constructor parameter, not a `Settings` value.
 - Real-venue fees are always `FEE_UNVERIFIED` in practice until member class, intermediary fees
   and schedule revisions are confirmed; the exception table is PARTIAL; the rebate-cap rule is
   an interpretation (mathematical-model §5.3).
+- Older `ReviewRecord`s can have `review_id = null`; the id remains in `source`.
 - Synthetic results support no empirical claim about real markets (docs/compliance.md).
 - Execution is never atomic across markets; certificates say so.
+- Host port 5432 may already be another Postgres. Compose reads `POSTGRES_PORT` (default 5432).
+  This machine's integration run used Docker `postgres:16.15` published on **5433**.
+- Playback `step`/`seek` rebuild the prefix from the start (or from the checkpoint). That is
+  correct and fine for the bundled sessions; it is not a constant-time seek.
+- The Kalshi connector remains a refused skeleton. No Kalshi network access.
+
+## How to resume Phase 10
+
+Phase 10 is the Next.js dashboard (`apps/web`). Do not start it by extending health routes into
+a detection API; public REST and SSE are Phase 11. Read persisted detections through
+`consistency_persistence` (certificate JSON, legs, scenarios). Replay controls should call
+`consistency_pipeline.playback.PlaybackService` rather than a second engine. `make dev` must
+keep failing visibly if the frontend cannot start, and must not report success for a missing UI.
+

@@ -27,11 +27,14 @@
 | `packages/core` (`consistency_core`) | money, tick grids, domain models, order books, relationships, scenarios, fees, pricing, classification, certificates |
 | `packages/simulation` (`consistency_simulation`) | seeded synthetic exchange, market families, injected scenarios, event-stream faults, dataset builder |
 | `packages/connectors` (`consistency_connectors`) | settings/guards, `MarketDataSource` ABC, synthetic/replay/Kalshi-skeleton sources, local book manager, bounded queues |
-| `apps/api` | FastAPI (health only in milestone 1) |
-| `apps/worker` | worker entry point (pipeline in milestone 2) |
+| `packages/pipeline` (`consistency_pipeline`) | incremental detection, lifecycle, journal, replay, playback |
+| `packages/persistence` (`consistency_persistence`) | SQLAlchemy repository, shared by the API and the worker |
+| `apps/api` | FastAPI health endpoints (readiness pings Postgres when configured) |
+| `apps/worker` | long-running detection pipeline |
 | `fixtures/` | golden fixtures, fee schedules, relationship reviews, bundled datasets |
 
-Dependency direction: `core` ← `simulation` ← `connectors` ← `apps`. Core imports nothing else.
+Dependency direction: `core` ← `simulation` ← `connectors` ← `pipeline` ← `persistence` ← `apps`.
+Core imports nothing else. Persistence does not import the worker or the simulator.
 
 ## Commands
 
@@ -41,7 +44,9 @@ make test                    # full pytest suite
 make test-golden             # golden fixtures A-J
 make lint                    # ruff check + ruff format --check
 make typecheck               # mypy --strict
-make seed                    # regenerate bundled datasets (deterministic)
+make datasets                # regenerate every synthetic dataset
+make seed                    # load synthetic reference data into Postgres (needs DATABASE_URL)
+make replay                  # replay fixtures/datasets/inconsistent and print the comparison
 uv run python scripts/generate_datasets.py --bundled --check   # verify fixtures are reproducible
 ```
 
