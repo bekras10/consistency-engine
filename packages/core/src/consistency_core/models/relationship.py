@@ -114,6 +114,7 @@ class ScenarioProvenance(FrozenModel):
 
 
 class ReviewRecord(FrozenModel):
+    review_id: str | None = None
     reviewer: str
     decision: VerificationStatus
     reasoning: str

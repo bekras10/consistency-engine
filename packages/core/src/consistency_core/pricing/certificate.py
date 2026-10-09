@@ -8,14 +8,16 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field
+from pydantic import AwareDatetime, Field
 
 from consistency_core.fees.calculator import FeeAssumptions, FeeResolution
 from consistency_core.fees.model import Role
 from consistency_core.fees.rounding import OrderFees
+from consistency_core.fees.schedule import ScheduleVerification
 from consistency_core.models.common import FrozenModel, MarketStatus, Side, SyncStatus
 from consistency_core.models.detection import Classification
 from consistency_core.models.relationship import (
+    EvidenceCheck,
     RelationshipType,
     ScenarioProvenance,
     ScenarioSpec,
@@ -26,7 +28,7 @@ from consistency_core.pricing.depth import DepthWalkResult
 from consistency_core.pricing.payoff import PayoffAnalysis
 from consistency_core.pricing.portfolio import Leg, Template
 
-CERTIFICATE_VERSION = "proof-certificate/1"
+CERTIFICATE_VERSION = "proof-certificate/2"
 ENGINE_VERSION = "consistency-engine/0.1.0"
 
 DISCLAIMER = (
@@ -142,12 +144,29 @@ class QuantityEvaluation(FrozenModel):
     """Per-unit figures are informational (floored to 1e-8); gates compare totals exactly."""
 
 
+SearchMethod = Literal["EXHAUSTIVE", "BREAKPOINT_APPROXIMATE", "TARGET", "NONE"]
+
+
 class QuantitySearch(FrozenModel):
+    """How the reported quantity was chosen.
+
+    ``EXHAUSTIVE`` evaluates every domain point, so the reported optimum is exact. ``TARGET``
+    evaluates the single requested size (exact by definition). ``BREAKPOINT_APPROXIMATE``
+    evaluates only depth breakpoints +/- a radius plus the endpoints: the optimum over the full
+    domain is *not* guaranteed (``optimal_quantity_is_exact`` is False), although every figure
+    reported at the chosen quantity is an exact re-evaluation at that quantity
+    (``reported_quantity_evaluation_is_exact``). ``NONE``: the search was not reached.
+    """
+
     quantity_step: Dec
     domain_lower: Dec
     max_supported_quantity: Dec
     """Largest basket on the quantity grid fully covered by displayed depth on every leg."""
-    method: Literal["exhaustive", "breakpoints", "target", "none"]
+    method: SearchMethod
+    optimal_quantity_is_exact: bool = False
+    reported_quantity_evaluation_is_exact: bool = True
+    domain_points: int | None = None
+    """Number of points in the full quantity domain (evaluated or not)."""
     points_evaluated: int
     best_gross_quantity: Dec | None
     best_net_quantity: Dec | None
@@ -167,12 +186,69 @@ class TraceStep(FrozenModel):
     detail: str
 
 
+class ReviewProvenance(FrozenModel):
+    review_id: str | None
+    reviewer: str
+    decision: VerificationStatus
+    reviewed_at: AwareDatetime
+    justification: str
+    source: str
+
+
+class RulesCheck(FrozenModel):
+    market_id: str
+    recorded_hash: str | None
+    """Rules hash stored on the relationship when it was verified."""
+    current_hash: str | None
+    """Rules hash of the market definition used for this evaluation (None: market unknown)."""
+    matches: bool
+
+
+class VerificationRecord(FrozenModel):
+    """Why the relationship may be relied upon: status, every check with its evidence, who
+    reviewed it, and the rules / scenario-integrity state at evaluation time."""
+
+    status: VerificationStatus
+    checks: tuple[EvidenceCheck, ...]
+    discovered_by: str
+    reasoning: str
+    reviewer: str | None
+    reviews: tuple[ReviewProvenance, ...]
+    rules: tuple[RulesCheck, ...]
+    scenario_integrity: tuple[str, ...]
+    """Scenario-integrity reason codes at evaluation time (empty = set matches derivation)."""
+
+
+class FeeScheduleRef(FrozenModel):
+    schedule_id: str
+    label: str | None
+    version: str | None
+    """``sha256:`` content hash of the schedule definition."""
+    effective_from: AwareDatetime | None
+    verification_status: ScheduleVerification | None
+    fictional: bool
+    markets: tuple[str, ...]
+    resolutions_verified: bool
+    """True when every leg resolution against this schedule passed the live-fee gate."""
+
+
+class ValidationInfo(FrozenModel):
+    gates_evaluated: tuple[str, ...]
+    gates_passed: tuple[str, ...]
+    gates_not_reached: tuple[str, ...]
+    first_failing_gate: str | None
+
+
 class ProofCertificate(FrozenModel):
     certificate_version: str = CERTIFICATE_VERSION
     engine_version: str = ENGINE_VERSION
     relationship: RelationshipRef
+    verification: VerificationRecord
     portfolio: PortfolioRef
     config: EvaluationConfig
+    config_hash: str
+    """``sha256_of(config)``."""
+    validation: ValidationInfo
     books: tuple[BookInput, ...]
     timing: TimingInfo
     payoff: PayoffAnalysis | None
@@ -181,6 +257,7 @@ class ProofCertificate(FrozenModel):
     evaluation: QuantityEvaluation | None
     fees: tuple[FeeResolution, ...] | None
     fee_schedule_ids: tuple[str, ...]
+    fee_schedules: tuple[FeeScheduleRef, ...]
     fictional_fees: bool
     classification: Classification
     reason_codes: tuple[str, ...]

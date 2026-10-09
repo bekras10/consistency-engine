@@ -167,7 +167,7 @@ def test_edge_gate_picks_best_qualifying_quantity() -> None:
     e = ev.certificate.evaluation
     assert cap is not None and e is not None
     assert cap.max_supported_quantity == D(1520)
-    assert cap.method == "exhaustive"
+    assert cap.method == "EXHAUSTIVE"
     assert cap.best_execution_quantity is not None
     assert D(700) < cap.best_execution_quantity < D(900)
     assert e.execution_adjusted_profit >= D("0.01") * e.quantity
@@ -183,7 +183,7 @@ def test_breakpoint_search_agrees_with_exhaustive() -> None:
     full = run_a(fx=_thin_top_deep_book())
     bp = run_a(fx=_thin_top_deep_book(), config={"exhaustive_search_limit": 10})
     assert bp.certificate.capacity is not None and full.certificate.capacity is not None
-    assert bp.certificate.capacity.method == "breakpoints"
+    assert bp.certificate.capacity.method == "BREAKPOINT_APPROXIMATE"
     assert bp.certificate.capacity.points_evaluated < full.certificate.capacity.points_evaluated
     assert bp.classification is full.classification
     assert (

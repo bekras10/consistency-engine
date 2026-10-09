@@ -126,6 +126,7 @@ def apply_reviews(
         members = [markets[m] for m in review.members]
         existing = next((r for r in by_id.values() if _same(r, review)), None)
         record = ReviewRecord(
+            review_id=review.review_id,
             reviewer=review.reviewer,
             decision=review.decision,
             reasoning=review.reasoning,

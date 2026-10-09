@@ -37,6 +37,8 @@ class PayoffAnalysis(FrozenModel):
     admissible_state_count: int
     scenario_sets: int = 1
     """>1 when the derived set was added because the relationship's own set failed integrity."""
+    scenario_specs: tuple[ScenarioSpec, ...] = ()
+    """The specs whose union was priced (members order): the admissible set is re-derivable."""
     constant: Dec
     weights: dict[str, Dec]
     min_payoff_per_unit: Dec
@@ -75,7 +77,8 @@ def analyse_payoff(
     """Exact worst case over the union of ``specs`` (default: the relationship's own set)."""
     members = relationship.members
     constant, weights = payoff_coefficients(portfolio, members)
-    spaces = [ScenarioSpace(sp, len(members)) for sp in (specs or [relationship.scenario_spec])]
+    used = tuple(specs or [relationship.scenario_spec])
+    spaces = [ScenarioSpace(sp, len(members)) for sp in used]
     lows = [sp.min_linear(constant, weights) for sp in spaces]
     lo, worst = min(lows, key=lambda t: t[0])
     hi = max(sp.max_linear(constant, weights)[0] for sp in spaces)
@@ -98,6 +101,7 @@ def analyse_payoff(
         method="enumerated" if states is not None else "constraint",
         admissible_state_count=count,
         scenario_sets=len(spaces),
+        scenario_specs=used,
         constant=constant,
         weights=dict(zip(members, weights, strict=True)),
         min_payoff_per_unit=lo,

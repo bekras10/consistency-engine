@@ -54,15 +54,21 @@ from consistency_core.money import ONE, QUANTITY_DP, VWAP_QUANTUM, ZERO, ceil_to
 from consistency_core.pricing.certificate import (
     BookInput,
     EvaluationConfig,
+    FeeScheduleRef,
     LegExecution,
     PortfolioRef,
     ProofCertificate,
     QuantityEvaluation,
     QuantitySearch,
     RelationshipRef,
+    ReviewProvenance,
+    RulesCheck,
+    SearchMethod,
     TimingInfo,
     TopOfBook,
     TraceStep,
+    ValidationInfo,
+    VerificationRecord,
 )
 from consistency_core.pricing.depth import walk_asks
 from consistency_core.pricing.payoff import (
@@ -272,6 +278,7 @@ class _Evaluator:
         self.resolutions: tuple[FeeResolution, ...] | None = None
         self.max_age: int | None = None
         self.skew: int | None = None
+        self.integrity: list[str] = []
         self.legs: list[_Leg] = []
         self.step = ONE
         self.min_payoff = ZERO
@@ -330,7 +337,8 @@ class _Evaluator:
             if leg.market_id not in self.markets:
                 r.append(Reason.MARKET_UNKNOWN)
         try:
-            r.extend(integrity_reasons(self.rel))
+            self.integrity = integrity_reasons(self.rel)
+            r.extend(self.integrity)
             self.payoff = analyse_payoff(self.rel, self.pf, pricing_specs(self.rel))
             self.min_payoff = self.payoff.min_payoff_per_unit
         except PortfolioNotInRelationshipError:
@@ -441,7 +449,7 @@ class _Evaluator:
             quantity_step=self.step,
             domain_lower=lo,
             max_supported_quantity=qmax,
-            method="target" if target is not None else "none",
+            method="TARGET" if target is not None else "NONE",
             points_evaluated=0,
             best_gross_quantity=None,
             best_net_quantity=None,
@@ -460,12 +468,17 @@ class _Evaluator:
             return [Reason.DEPTH_BELOW_MINIMUM]
         return []
 
-    def _candidates(self) -> tuple[list[Decimal], str]:
+    def _domain_points(self) -> int:
         if self.cfg.target_quantity is not None:
-            return [self.cfg.target_quantity], "target"
-        n = int((self.qmax - self.q_lo) / self.step) + 1
+            return 1
+        return int((self.qmax - self.q_lo) / self.step) + 1
+
+    def _candidates(self) -> tuple[list[Decimal], SearchMethod]:
+        if self.cfg.target_quantity is not None:
+            return [self.cfg.target_quantity], "TARGET"
+        n = self._domain_points()
         if n <= self.cfg.exhaustive_search_limit:
-            return [self.q_lo + k * self.step for k in range(n)], "exhaustive"
+            return [self.q_lo + k * self.step for k in range(n)], "EXHAUSTIVE"
         pts: set[Decimal] = {self.q_lo, self.qmax}
         fstep = Fraction(self.step)
         for lg in self.legs:
@@ -478,7 +491,7 @@ class _Evaluator:
                         q = Decimal(base + d) * self.step
                         if self.q_lo <= q <= self.qmax:
                             pts.add(q)
-        return sorted(pts), "breakpoints"
+        return sorted(pts), "BREAKPOINT_APPROXIMATE"
 
     def _gross(self, q: Decimal) -> Decimal:
         premium = sum((lg.fills(q * lg.side_ratio)[0] for lg in self.legs), ZERO)
@@ -492,6 +505,8 @@ class _Evaluator:
         self.search = self.search.model_copy(
             update={
                 "method": method,
+                "optimal_quantity_is_exact": method != "BREAKPOINT_APPROXIMATE",
+                "domain_points": self._domain_points(),
                 "points_evaluated": len(self.points),
                 "best_gross_quantity": best.q,
             }
@@ -693,7 +708,9 @@ class _Evaluator:
                     received_ts_ms=None if b is None else b.received_ts_ms,
                     confirmed_through_ms=None if b is None else b.confirmed_through_ms,
                     observed_ts_ms=None if b is None else b.observed_ts_ms,
-                    age_ms=None if b is None else self.now_ms - b.observed_ts_ms,
+                    age_ms=None
+                    if b is None or b.observed_ts_ms > self.now_ms
+                    else self.now_ms - b.observed_ts_ms,
                     book_hash=None if b is None else book_hash(b),
                     asks=()
                     if b is None
@@ -701,6 +718,66 @@ class _Evaluator:
                 )
             )
         return tuple(out)
+
+    def verification_record(self) -> VerificationRecord:
+        rel = self.rel
+        return VerificationRecord(
+            status=rel.verification_status,
+            checks=rel.evidence,
+            discovered_by=rel.discovered_by,
+            reasoning=rel.reasoning,
+            reviewer=rel.reviewer,
+            reviews=tuple(
+                ReviewProvenance(
+                    review_id=rv.review_id,
+                    reviewer=rv.reviewer,
+                    decision=rv.decision,
+                    reviewed_at=rv.reviewed_at,
+                    justification=rv.reasoning,
+                    source=rv.source,
+                )
+                for rv in rel.reviews
+            ),
+            rules=tuple(
+                RulesCheck(
+                    market_id=m,
+                    recorded_hash=rel.rules_hashes.get(m),
+                    current_hash=None if m not in self.markets else self.markets[m].rules_hash,
+                    matches=m in self.markets
+                    and self.markets[m].rules_hash == rel.rules_hashes.get(m),
+                )
+                for m in rel.members
+            ),
+            scenario_integrity=tuple(self.integrity),
+        )
+
+    def validation_info(self) -> ValidationInfo:
+        evaluated = tuple(t.check for t in self.trace if t.outcome != "not_reached")
+        return ValidationInfo(
+            gates_evaluated=evaluated,
+            gates_passed=tuple(t.check for t in self.trace if t.outcome == "pass"),
+            gates_not_reached=tuple(t.check for t in self.trace if t.outcome == "not_reached"),
+            first_failing_gate=next((t.check for t in self.trace if t.outcome == "fail"), None),
+        )
+
+    def fee_schedule_refs(self) -> tuple[FeeScheduleRef, ...]:
+        by_id: dict[str, list[FeeResolution]] = {}
+        for res in self.resolutions or ():
+            if res.schedule_id is not None:
+                by_id.setdefault(res.schedule_id, []).append(res)
+        return tuple(
+            FeeScheduleRef(
+                schedule_id=sid,
+                label=group[0].schedule_label,
+                version=group[0].schedule_version,
+                effective_from=group[0].schedule_effective_from,
+                verification_status=group[0].schedule_verification,
+                fictional=group[0].fictional,
+                markets=tuple(sorted(r.market_id for r in group)),
+                resolutions_verified=all(r.verified for r in group),
+            )
+            for sid, group in sorted(by_id.items())
+        )
 
 
 def evaluate(
@@ -736,10 +813,13 @@ def evaluate(
             constraints=rel.constraints,
             invalidation_reason=rel.invalidation_reason,
         ),
+        verification=ev.verification_record(),
         portfolio=PortfolioRef(
             strategy_id=portfolio.strategy_id, template=portfolio.template, legs=portfolio.legs
         ),
         config=cfg,
+        config_hash=sha256_of(cfg),
+        validation=ev.validation_info(),
         books=ev.book_inputs(),
         timing=TimingInfo(
             now_ms=now_ms,
@@ -755,6 +835,7 @@ def evaluate(
         fee_schedule_ids=tuple(
             sorted({r.schedule_id for r in resolutions or () if r.schedule_id is not None})
         ),
+        fee_schedules=ev.fee_schedule_refs(),
         fictional_fees=any(r.fictional for r in resolutions or ()),
         classification=classification,
         reason_codes=tuple(str(r) for r in reasons),

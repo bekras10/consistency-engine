@@ -33,6 +33,7 @@ from consistency_core.fees.schedule import FeeScheduleRegistry, ScheduleVerifica
 from consistency_core.models.common import DataSourceKind, FrozenModel
 from consistency_core.models.market import Market
 from consistency_core.money import Dec
+from consistency_core.serialization import sha256_of
 
 
 class IntermediaryFees(StrEnum):
@@ -72,6 +73,10 @@ class FeeResolution(FrozenModel):
     at: datetime
     schedule_id: str | None
     schedule_label: str | None
+    schedule_version: str | None = None
+    """``sha256:`` content hash of the selected schedule (changes with any revision)."""
+    schedule_verification: ScheduleVerification | None = None
+    schedule_effective_from: datetime | None = None
     fictional: bool
     verified: bool
     reasons: tuple[FeeReason, ...]
@@ -99,6 +104,7 @@ def venue_of(market: Market) -> Venue | None:
 class FeeCalculator:
     def __init__(self, registry: FeeScheduleRegistry) -> None:
         self.registry = registry
+        self._versions = {s.schedule_id: sha256_of(s) for s in registry.schedules}
 
     def resolve(
         self,
@@ -179,6 +185,9 @@ class FeeCalculator:
             at=at,
             schedule_id=None if schedule is None else schedule.schedule_id,
             schedule_label=None if schedule is None else schedule.label,
+            schedule_version=None if schedule is None else self._versions[schedule.schedule_id],
+            schedule_verification=None if schedule is None else schedule.verification_status,
+            schedule_effective_from=None if schedule is None else schedule.effective_from,
             fictional=schedule is not None
             and schedule.verification_status is ScheduleVerification.FICTIONAL,
             verified=not reasons,
