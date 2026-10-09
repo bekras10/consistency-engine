@@ -37,6 +37,21 @@ verification policy is: any `FAIL` evidence → `REJECTED`; otherwise any `UNKNO
 A manual review may replace the default with an explicit truth table (e.g. the Owls
 champion ⇒ finalist review lists `[[0,0],[0,1],[1,1]]`).
 
+**Scenario-set integrity (hardening pass).** Every relationship records
+`scenario_provenance`: `derived` (the set implied by its type and *proven* exhaustiveness) or
+`overridden` (with the exact diff against the derived set: removed / added states and counts).
+Adding states only weakens the guarantee and is accepted. *Removing* derived-admissible states
+asserts a stronger relationship; it is accepted only if (a) the review declares the removed
+states, a justification and evidence, the declared diff matches the computed one, and (b) every
+removed state is excluded by a separately VERIFIED, derived relationship over the same members
+(`justified_by`). Otherwise the relationship stays `CANDIDATE_REVIEW`
+(`SCENARIO_OVERRIDE_REMOVES_ADMISSIBLE_STATES`), and if such a set reaches the evaluator anyway
+(e.g. a tampered object) it fails step 1 and the payoff is priced over the **union** with the
+derived set, so the reported minimum can only fall. Sets that cannot be compared exactly fail
+with `SCENARIO_SET_UNCHECKABLE`. A claimed exhaustiveness the discovery could not prove is
+treated as a removal of the all-NO state. Revalidation demotes an override whose justifier is
+no longer verified.
+
 **Exhaustiveness is never assumed.** A categorical group is exhaustive only if the event
 declares `outcome_set_complete` *and* the listed outcomes equal the declared universe; interval
 bins only if `covers` proves the union of their exact raw preimages covers the value domain.
@@ -201,11 +216,38 @@ exec(Q)    = net(Q) − Σ_legs Q · ratio · assumed_extra_slippage_per_leg
                     − Σ_legs fee_buffer_leg            # default: one p increment per leg
 ```
 
-Domains of at most `exhaustive_search_limit` (2000) points are searched exhaustively. Larger
-domains are evaluated at every depth breakpoint (where a leg moves to its next level) ± 3
-steps plus the endpoints: between breakpoints the pre-rounding objective is linear in `Q`, so
-its maximum is at a breakpoint; only sub-cent rounding can differ. The method is recorded in
-the certificate. Ties always resolve to the **smaller** quantity.
+Domains of at most `exhaustive_search_limit` (2000) points are searched exhaustively
+(`EXHAUSTIVE`). Larger domains start from every depth breakpoint (where a leg moves to its next
+level) ± 3 steps plus the endpoints. `gross` is linear between breakpoints, so its maximum is at
+a candidate and exact. Fees are not: cent rounding makes `net` and `exec` saw-toothed between
+breakpoints, and a pure breakpoint search misses optima (measured below). The search therefore
+refines the gaps with a provable bound:
+
+```
+order_net_fee(fills) ≥ Σ_fills model_fee(fill)      (trade_fee = ceil(model) ≥ model; rounding ≥ 0;
+                                                    total rebates ≤ total rounding since the
+                                                    accumulator starts at 0 and stays ≥ 0)
+UB_net(Q)  = gross(Q) − Σ model_fee(Q)               linear between consecutive candidates
+UB_exec(Q) = UB_net(Q) − slippage(Q) − fee_buffers
+```
+
+A gap is evaluated point by point unless its end-point bounds prove no interior `Q` can beat
+(or tie at a smaller `Q`) the best `net`, extend the largest profitable `Q`, or beat the best
+edge-qualifying `exec` (the gate needs `max(UB_exec(Q) − e·Q) ≥ 0` over the gap). The result
+(`BOUNDED_EXACT`) equals the exhaustive optimum. If refinement would need more than
+`BOUNDED_REFINEMENT_LIMIT` (50 000) points, the result stays `BREAKPOINT_APPROXIMATE`:
+`optimal_quantity_is_exact = false`, and a negative finding (`FEES_EXCEED_EDGE`,
+`EDGE_BELOW_MINIMUM`) adds `QUANTITY_SEARCH_APPROXIMATE` because it may be a false negative.
+In every method the figures *at the reported quantity* are an exact evaluation at that quantity
+(`reported_quantity_evaluation_is_exact`); only the claim that it is the domain optimum differs.
+Ties always resolve to the **smaller** quantity.
+
+Measured (4000 seeded marginal books, domains of 2–600 points, pure breakpoint search vs
+exhaustive): 3 false negatives (exhaustive finds an edge-qualifying quantity, breakpoints do not:
+`DEPTH_SUPPORTED` instead of `FEE_ADJUSTED_CANDIDATE`), 38 suboptimal reported quantities (max
+execution-adjusted shortfall $0.44), 0 after-fee false negatives, 0 cases where the breakpoint
+objective exceeded the exhaustive one. `BOUNDED_EXACT` matched exhaustive search exactly on all
+4000 (`tests/property/test_breakpoint_search.py`).
 
 ### 6.3 Thresholds (`EvaluationConfig`, defaults)
 
@@ -219,7 +261,15 @@ the certificate. Ties always resolve to the **smaller** quantity.
 | `minimum_candidate_duration_ms` | 1000 | the condition must have persisted this long |
 
 `observed_ts` is the connection's confirmed-through time when known, else the exchange
-timestamp, else the receive time. The reported quantity is the **best edge-qualifying
+timestamp, else the receive time. Confirmed-through advances only on *accepted* messages
+(applied snapshot/delta, heartbeat): messages on a connection arrive in emission order and each
+earlier one was applied or desynchronized its book, so every still-SYNCHRONIZED book is complete
+as of that emission time. Duplicate, gapped, rejected, malformed and stale-subscription messages
+never advance it, and a message dated more than `max_future_ms` (default 1000) after its receipt
+is quarantined (book messages desynchronize their market with `FUTURE_TIMESTAMP`). If any leg's
+`observed_ts > now`, the age is undefined: step 3 fails with `NEGATIVE_BOOK_AGE`, and the
+certificate reports no age (never a negative one). Subscription sequence state is keyed by
+`(connection_id, subscription_id)`. The reported quantity is the **best edge-qualifying
 quantity**: maximum `exec(Q)` among the `Q` satisfying the edge gate (over all `Q` if none
 does, in which case `EDGE_BELOW_MINIMUM` is reported). Maximising unconstrained `exec` first and
 testing the gate afterwards would wrongly reject an opportunity that is profitable at small size
@@ -241,16 +291,16 @@ and later steps are recorded as `not_reached` in the trace.
 
 | Step | Check | Fails as | Reason codes |
 |---|---|---|---|
-| 1 | relationship verified, rules unchanged, portfolio drawn from members, ratios valid, scenarios modelable | `INVALID_RELATIONSHIP` | `RELATIONSHIP_NOT_VERIFIED`, `RULES_CHANGED`, `MARKET_UNKNOWN`, `PORTFOLIO_NOT_IN_RELATIONSHIP`, `UNSUPPORTED_LEG_RATIO`, `DUPLICATE_LEG`, `SCENARIOS_NOT_MODELABLE` |
+| 1 | relationship verified, rules unchanged, portfolio drawn from members, ratios valid, scenarios modelable and consistent with the derived set | `INVALID_RELATIONSHIP` | `RELATIONSHIP_NOT_VERIFIED`, `RULES_CHANGED`, `MARKET_UNKNOWN`, `PORTFOLIO_NOT_IN_RELATIONSHIP`, `UNSUPPORTED_LEG_RATIO`, `DUPLICATE_LEG`, `SCENARIOS_NOT_MODELABLE`, `SCENARIO_OVERRIDE_REMOVES_ADMISSIBLE_STATES`, `SCENARIO_SET_UNCHECKABLE` |
 | 2 | every leg book present and SYNCHRONIZED | `UNSYNCHRONIZED_DATA` | `BOOK_MISSING`, `BOOK_UNSYNCHRONIZED` |
-| 3 | book age and cross-market skew | `STALE_DATA` | `BOOK_TOO_OLD`, `CROSS_MARKET_SKEW` |
+| 3 | no book observed after `now`, book age and cross-market skew | `STALE_DATA` | `NEGATIVE_BOOK_AGE`, `BOOK_TOO_OLD`, `CROSS_MARKET_SKEW` |
 | 4 | leg markets OPEN, every leg has asks | `INSUFFICIENT_LIQUIDITY` | `MARKET_NOT_OPEN`, `NO_ASKS` |
 | 5 | top-of-book worst-case edge `min_payoff − Σ best asks > 0` | `NO_OPPORTUNITY` | `NO_PRE_FEE_EDGE` (+ `NO_GUARANTEED_PAYOFF` if min payoff ≤ 0) |
 | 6 | depth supports the required size | `INSUFFICIENT_LIQUIDITY` | `DEPTH_BELOW_MINIMUM`, `TARGET_OFF_QUANTITY_GRID` |
 | 7 | best `gross(Q) > 0` over the domain | `INSUFFICIENT_LIQUIDITY` | `EDGE_EXHAUSTED_BY_DEPTH` |
 | 8 | every leg's fee resolution verified | `FEE_UNVERIFIED` | `FEE_UNVERIFIED`, `FEE:<reason>` |
-| 9 | best `net(Q) > 0` | `THEORETICAL_ONLY` | `FEES_EXCEED_EDGE` |
-| 10 | edge gate, duration known and ≥ minimum, TAKER role | `DEPTH_SUPPORTED` | `EDGE_BELOW_MINIMUM`, `DURATION_UNKNOWN`, `DURATION_BELOW_MINIMUM`, `NON_DEFAULT_MAKER_ASSUMPTION` |
+| 9 | best `net(Q) > 0` | `THEORETICAL_ONLY` | `FEES_EXCEED_EDGE` (+ `QUANTITY_SEARCH_APPROXIMATE`) |
+| 10 | edge gate, duration known and ≥ minimum, TAKER role | `DEPTH_SUPPORTED` | `EDGE_BELOW_MINIMUM` (+ `QUANTITY_SEARCH_APPROXIMATE`), `DURATION_UNKNOWN`, `DURATION_BELOW_MINIMUM`, `NON_DEFAULT_MAKER_ASSUMPTION` |
 | — | everything passed | `FEE_ADJUSTED_CANDIDATE` | (none) |
 
 Order rationale: an unverified relationship or untrusted data makes every later number
@@ -260,14 +310,25 @@ fee-adjusted on guessed fees.
 
 ## 8. Proof certificate
 
-`ProofCertificate` (`proof-certificate/1`) is a frozen Pydantic model serialised as canonical
+`ProofCertificate` (`proof-certificate/2`) is a frozen Pydantic model serialised as canonical
 JSON (sorted keys, no floats, every Decimal a fixed-point string). Its SHA-256
 (`sha256:<hex>`) identifies the evaluation; processing latency is reported beside it and
 excluded from the hash, so identical inputs give byte-identical certificates. It contains:
-relationship (id, type, members, status, rules hashes, scenario spec, constraints); portfolio
+relationship (id, type, members, status, rules hashes, scenario spec, scenario provenance with
+the override diff, constraints); a verification record (status, every evidence check with its
+outcome and detail, discovered-by, reviewer, each review's id / reviewer / timestamp /
+decision / justification / source, recorded vs current rules hash per member, scenario-integrity
+codes at evaluation time); validation metadata (gates evaluated, passed, not reached, first
+failing gate); the configuration and its `config_hash`; fee schedules used (id, label,
+`version` = content hash, effective-from, verification status, fictional flag, markets, whether
+every resolution passed the live-fee gate); portfolio
 (strategy id, legs); per-leg book inputs (sync, sequence, timestamps, age, book hash, asks
-used); timing; payoff analysis (method, admissible state count, worst state, per-state payoffs
-when ≤ 256); top-of-book edge; quantity search (step, domain, `qmax`, method, points, best
+used; age never negative); timing; payoff analysis (method, the scenario specs whose union was
+priced, admissible state count, worst state, per-state payoffs when ≤ 256 — enough to
+re-derive the admissible set and the minimum payoff from the certificate alone, which
+`test_min_payoff_and_admissible_set_rederivable_from_certificate` does for every golden case);
+top-of-book edge; quantity search (step, domain, `qmax`, method, `optimal_quantity_is_exact`,
+`reported_quantity_evaluation_is_exact`, domain points, points evaluated, best
 gross/net/execution quantities, max profitable quantity, edge-qualifying points); the full
 evaluation at the reported quantity (per-leg walk, per-fill fee components, order totals,
 slippage and fee buffers); fee resolutions and schedule ids (with a `fictional` flag); the

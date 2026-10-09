@@ -55,7 +55,22 @@ Each side lists **bids** as `[price_dollars, quantity_fp]`. A legacy shape with 
 ```
 
 `seq` is treated as scoped to the subscription `sid`, **not** to a market: a gap on a `sid`
-desynchronises every market carried on it.
+desynchronises every market carried on it. A `sid` is only assumed unique within one
+connection, so subscription state is keyed by `(connection_id, sid)`.
+
+### Downstream `BookUpdate` notifications
+
+Every loss of trust is published as an explicit `BookUpdate` (`kind = "desync"`,
+`sync_status = UNSYNCHRONIZED`, `reason`) for every affected market, without waiting for further
+market data: in-stream faults (`SEQUENCE_GAP`, `MALFORMED_MESSAGE:*`, `INVALID_*`,
+`NEGATIVE_QUANTITY`, `CROSSED_BOOK`, `FUTURE_TIMESTAMP`, `CONNECTION_LOST` events) and runner
+failures (`CONNECTION_LOST`, `HEARTBEAT_TIMEOUT`, `RECONNECT_EXHAUSTED`, `AUTHENTICATION_FAILED`,
+`END_OF_STREAM` for live sources, `SOURCE_ERROR` for any other source exception,
+`RUNNER_STOPPED` on cancellation). The coalescing queue keeps the newest update per market in
+processing order, so a desync is only ever superseded by a *later* state of that market; runner
+desyncs use a non-blocking `put_urgent` (never dropped, may exceed `maxsize` by at most the
+number of markets), and a resynchronized update that replaced an unconsumed desync carries
+`interrupted = true`.
 
 ### Market metadata / tick grid
 
@@ -121,13 +136,18 @@ Series matching is exact string equality on the series ticker.
 suffix appears only when ≠ 1. `parse_strategy_id` is the exact inverse and rejects
 non-canonical ids.
 
-## Proof certificate (`proof-certificate/1`)
+## Proof certificate (`proof-certificate/2`)
 
 Canonical JSON: sorted keys, UTF-8, no JSON numbers for money (every Decimal is a fixed-point
 string; integers such as timestamps and counts are JSON integers), no floats anywhere. Top-level
-keys: `books`, `capacity`, `certificate_version`, `classification`, `config`, `engine_version`,
-`evaluation`, `fee_schedule_ids`, `fees`, `fictional_fees`, `notes`, `payoff`, `portfolio`,
-`reason_codes`, `relationship`, `timing`, `top_of_book`, `trace`. Sections that a failing step
+keys: `books`, `capacity`, `certificate_version`, `classification`, `config`, `config_hash`,
+`engine_version`, `evaluation`, `fee_schedule_ids`, `fee_schedules`, `fees`, `fictional_fees`,
+`notes`, `payoff`, `portfolio`, `reason_codes`, `relationship`, `timing`, `top_of_book`,
+`trace`, `validation`, `verification`. Version 2 (hardening pass) added `config_hash`,
+`fee_schedules`, `validation`, `verification`, `payoff.scenario_specs`,
+`relationship.scenario_provenance`, `capacity.optimal_quantity_is_exact` /
+`reported_quantity_evaluation_is_exact` / `domain_points`, and renamed the search methods to
+`EXHAUSTIVE` / `BOUNDED_EXACT` / `BREAKPOINT_APPROXIMATE` / `TARGET` / `NONE`. Sections that a failing step
 never reached are `null`. Per-fill fee records carry `fill_index`, `role`, `price`,
 `quantity`, `revenue`, `model_fee`, `trade_fee`, `aligned_change`, `rounding_fee`,
 `accumulator_before`, `rebate`, `accumulator_after`, `net_fee`, `balance_change`; order totals

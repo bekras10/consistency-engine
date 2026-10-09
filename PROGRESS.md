@@ -231,10 +231,78 @@ Module boundaries for later milestones:
 - Docs: `docs/mathematical-model.md`, `docs/compliance.md`, `docs/data-contracts.md` (fee config,
   strategy ids, certificate, fixture format).
 
+## Hardening pass (phases 1–6, before Phase 7) — 2026-10-08
+
+Process per issue: regression tests first, confirmed failing on the pre-fix code, then the fix.
+No golden expectation (fixtures A–J, `tests/golden/*`, official fee examples) was changed:
+`git diff bff0fd5 -- fixtures/golden tests/golden tests/golden/test_fee_golden.py` is empty
+(the only fixture edit is a 3-line comment in `manual-reviews.yaml`).
+
+| Issue | Tests added | Pre-fix failure | Commit |
+|---|---|---|---|
+| P1 scenario integrity | `test_scenario_integrity.py` (20) | review dropping state 01 from YES(A)+NO(B) stayed VERIFIED and evaluated `FEE_ADJUSTED_CANDIDATE`, min payoff 1 (true worst case 0) | f86e8bb |
+| P1 connection-failure publication | `test_runner_desync.py` (11) | auth / exhausted / heartbeat / EOS: consumers only ever saw the stale `snapshot SYNCHRONIZED`; an unexpected source exception hung the runner (`TimeoutError`) | 826ca27 |
+| P2 subscription identity | `test_subscription_identity.py` (8) | B's snapshot on c2/sid=1 dropped as a duplicate of c1/sid=1 (B stuck `AWAITING_SNAPSHOT`) | a587de4 |
+| P2 trusted freshness | `test_trusted_freshness.py` (13) | duplicate / gapped / rejected / stale-sid messages advanced confirmed-through by 60 s; a book 1 ms in the future evaluated `FEE_ADJUSTED_CANDIDATE` with age −1 | dd02c45 |
+| P2 evidence-bearing certificates | `test_certificate_evidence.py` (23, incl. re-derivation for all 12 golden cases) | certificate had no `verification` / `config_hash` / `fee_schedules` / `validation` / `payoff.scenario_specs` | aaa1352 |
+| P2 approximate optimisation | `tests/property/test_breakpoint_search.py` (10, Hypothesis + seeded sweeps) | large domains labelled only `BREAKPOINT_APPROXIMATE`; the 3 recorded cases misclassified `DEPTH_SUPPORTED` (exhaustive: `FEE_ADJUSTED_CANDIDATE`) | 6914aad |
+
+Fix summaries:
+
+- **Scenario integrity**: `scenario_provenance` (derived/overridden + exact diff) on every
+  relationship; overrides that remove derived-admissible states need declared diff,
+  justification, evidence and a separately verified justifier over the same members, else
+  `CANDIDATE_REVIEW`; the evaluator re-checks independently (step 1) and prices the union with
+  the derived set; an unproven `exhaustive` claim on an exclusive group is no longer silently
+  ignored; `revalidate` demotes overrides whose justifier lapsed.
+- **Connection failures**: the runner tracks every connection seen on the subscription and, on
+  each loss path (`CONNECTION_LOST`, `HEARTBEAT_TIMEOUT`, `RECONNECT_EXHAUSTED`,
+  `AUTHENTICATION_FAILED`, live `END_OF_STREAM`, `SOURCE_ERROR`, `RUNNER_STOPPED`), publishes
+  `BookManager.connection_lost(...)` updates through non-blocking `put_urgent`; a coalesced
+  resync over an unconsumed desync carries `interrupted=True`. Finite recordings
+  (`stream_is_finite`) end without desync. Queue semantics documented in `queues.py` and
+  data-contracts.
+- **Subscription identity**: `_subs` keyed by `(connection_id, sid)` for sequence, gap,
+  duplicate and malformed-recovery state; `state_view` keys are `conn/sid`.
+- **Trusted freshness**: confirmed-through advances only on accepted messages (applied
+  snapshot/delta, heartbeat — proof in `book_manager.py` and mathematical-model §6.3); messages
+  dated > `max_future_ms` (default 1000, constructor parameter) after receipt are quarantined
+  (`FUTURE_TIMESTAMP` desync for book messages, sequence still consumed); evaluator step 3 fails
+  any `observed_ts > now` with `NEGATIVE_BOOK_AGE` and certificates never report negative ages.
+- **Certificates** (`proof-certificate/2`): verification record (status, all evidence checks,
+  reviewer + review ids/timestamps/justifications, recorded vs current rules hashes, integrity
+  codes), scenario provenance, priced scenario specs, fee schedule id / content-hash version /
+  effective date / verification status, `config_hash`, search method + exactness flags,
+  validation metadata. Deterministic (hash equality tests).
+- **Search**: new `BOUNDED_EXACT` refinement with a proven fee lower bound
+  (`order_net_fee_lower_bound`); `BREAKPOINT_APPROXIMATE` kept as a labelled fallback beyond
+  50 000 extra points with `optimal_quantity_is_exact=false` and
+  `QUANTITY_SEARCH_APPROXIMATE` on negative findings. Figures at the reported quantity are exact
+  in every method (`reported_quantity_evaluation_is_exact`).
+
+Breakpoint-vs-exhaustive statistics (4000 seeded marginal books, `random_case` in
+`tests/property/breakpoint_support.py`, domains 2–600 points, refinement disabled):
+3197 comparable cases; 3 edge false negatives (0.09 %), 0 after-fee false negatives, 38
+suboptimal reported quantities (1.2 %, max execution-adjusted shortfall $0.44), 0 cases where
+breakpoint beat exhaustive, 3 classification differences (the false negatives). Every breakpoint
+result re-evaluated exactly at its quantity. With refinement enabled (default), all 4000 cases
+were identical to exhaustive search (classification, reasons, every evaluated figure).
+
+Final verification: `make lint` clean (97 files formatted), `make typecheck` clean (55 source
+files), `make test` 309 passed / 0 failed / 0 skipped; unit 252, golden 33, property 24; CI set
+`tests/unit tests/golden tests/replay` 285 passed.
+
+Remaining limitations: the `BREAKPOINT_APPROXIMATE` fallback can still miss optima on very large
+domains (labelled); `max_future_ms` is a constructor parameter, not yet a `Settings` value; the
+runner stops (FAILED) rather than reconnecting on a live end-of-stream; review ids exist only on
+records created after this pass (older `ReviewRecord`s carry `review_id = null`, the id remains
+in `source`).
+
 ## Deviations from the specification
 
 - **Optimizer**: no SciPy/HiGHS. Only canonical templates with integer leg ratios are priced,
-  and the quantity domain is searched exhaustively (≤ 2000 points) or at depth breakpoints. This
+  and the quantity domain is searched exhaustively (≤ 2000 points) or by the bounded exact
+  search (breakpoints + provably-bounded gap refinement; hardening pass). This
   is the "independently tested simple implementation" the spec asks to preserve; a general LP
   optimiser is deferred.
 - **Fee configuration scope**: overrides are per series (exact ticker) plus KXMVE combo class.
@@ -255,9 +323,9 @@ Module boundaries for later milestones:
 
 - No detection pipeline, persistence, API beyond health, or frontend (milestones 2–3). The
   Test I scan loop lives in `tests/golden/replay_support.py` and is not production code.
-- Breakpoint search can miss sub-cent rounding optima and, with the edge gate, may report a
-  smaller qualifying quantity than the true constrained optimum (conservative). Exhaustive
-  search is used for all bundled fixtures.
+- Large-domain search is exact (`BOUNDED_EXACT`) unless refinement would exceed 50 000 extra
+  points; it then falls back to a labelled `BREAKPOINT_APPROXIMATE` result that can miss optima
+  (measured rates in the hardening section). Exhaustive search is used for all bundled fixtures.
 - Real-venue fees are always `FEE_UNVERIFIED` in practice until member class, intermediary fees
   and schedule revisions are confirmed; the exception table is PARTIAL; the rebate-cap rule is
   an interpretation (mathematical-model §5.3).
