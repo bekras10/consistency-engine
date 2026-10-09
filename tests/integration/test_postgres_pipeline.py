@@ -362,7 +362,7 @@ async def test_inconsistent_dataset_classifications_and_lifecycle(db: str) -> No
     assert len(seen) == 8
     assert dict(Counter(ev.kind.value for ev in events)) == {
         "OPENED": 12,
-        "UPDATED": 39,
+        "UPDATED": 120,
         "EXPIRED": 7,
         "RESOLVED": 5,
     }

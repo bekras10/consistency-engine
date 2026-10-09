@@ -389,10 +389,14 @@ async def test_worker_graceful_stop_on_live_source_closes_detections() -> None:
     await asyncio.wait_for(svc.started.wait(), 2)
 
     async def _saw_update() -> None:
+        # The scripted live source finishes inside one poll interval, so the detection may
+        # already be closed by END_OF_STREAM before the next look at active rows. The update
+        # is still on the slot. Shutdown assertions below are unchanged.
         while True:
             listener = svc.listener
             if listener is not None and any(
-                d.event_count >= 2 for d in listener.engine.active_detections()
+                slot.detection is not None and slot.detection.event_count >= 2
+                for slot in listener.engine._slots.values()
             ):
                 return
             await asyncio.sleep(0.01)

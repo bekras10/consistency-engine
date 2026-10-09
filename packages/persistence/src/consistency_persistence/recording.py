@@ -14,6 +14,7 @@ from sqlalchemy import delete, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from consistency_core.events import OrderBookSnapshotEvent
+from consistency_core.pricing.certificate import ProofCertificate
 from consistency_core.serialization import canonical_json
 from consistency_persistence.schema import (
     DetectionLegRow,
@@ -99,9 +100,15 @@ class BatchJournal:
     async def flush(self) -> None:
         if not self._buf:
             return
-        batch, self._buf = self._buf, []
+        # Keep the buffer until the commit succeeds. A failed transaction must not drop
+        # entries; the next flush retries the same batch. Appends during the attempt stay
+        # behind the prefix that was sent.
+        batch = list(self._buf)
         async with self._sessions() as session, session.begin():
             await _insert_journal(session, self._session_id, self._versions, batch)
+        if self._buf[: len(batch)] != batch:
+            raise RuntimeError("journal buffer changed during flush")
+        del self._buf[: len(batch)]
 
 
 async def _insert_journal(
@@ -214,19 +221,28 @@ async def _apply_event(session: AsyncSession, ev: DetectionEvent) -> None:
             setattr(existing, key, value)
     if ev.evaluation is None:
         return
+    await replace_certificate_projection(
+        session, rec.detection_id, ev.evaluation.certificate_json()
+    )
+
+
+async def replace_certificate_projection(
+    session: AsyncSession, detection_id: str, certificate_json: str
+) -> None:
+    """Replace legs and scenarios so they match ``certificate_json`` exactly."""
+    cert = ProofCertificate.model_validate_json(certificate_json)
     await session.execute(
-        delete(DetectionLegRow).where(DetectionLegRow.detection_id == rec.detection_id)
+        delete(DetectionLegRow).where(DetectionLegRow.detection_id == detection_id)
     )
     await session.execute(
-        delete(DetectionScenarioRow).where(DetectionScenarioRow.detection_id == rec.detection_id)
+        delete(DetectionScenarioRow).where(DetectionScenarioRow.detection_id == detection_id)
     )
-    cert = ev.evaluation.certificate
     executed = list(cert.evaluation.legs) if cert.evaluation is not None else []
     for index, leg in enumerate(cert.portfolio.legs):
         walked = executed[index] if index < len(executed) else None
         session.add(
             DetectionLegRow(
-                detection_id=rec.detection_id,
+                detection_id=detection_id,
                 leg_index=index,
                 market_id=leg.market_id,
                 side=leg.side.value,
@@ -241,7 +257,7 @@ async def _apply_event(session: AsyncSession, ev: DetectionEvent) -> None:
         for index, state in enumerate(payoff.states):
             session.add(
                 DetectionScenarioRow(
-                    detection_id=rec.detection_id,
+                    detection_id=detection_id,
                     scenario_index=index,
                     state_json=canonical_json(state.state),
                     payoff_per_unit=state.payoff_per_unit,
@@ -251,7 +267,7 @@ async def _apply_event(session: AsyncSession, ev: DetectionEvent) -> None:
     elif payoff is not None:
         session.add(
             DetectionScenarioRow(
-                detection_id=rec.detection_id,
+                detection_id=detection_id,
                 scenario_index=0,
                 state_json=canonical_json(payoff.worst_state),
                 payoff_per_unit=payoff.min_payoff_per_unit,

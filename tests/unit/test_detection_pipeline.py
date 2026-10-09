@@ -19,6 +19,8 @@ from consistency_core.models import MarketStatus, Side
 from consistency_core.models.detection import Classification
 from consistency_core.models.market import Catalog
 from consistency_core.models.relationship import Relationship
+from consistency_core.money import dec
+from consistency_core.pricing.evaluator import Evaluation
 from consistency_core.relationships.discovery import discover
 from consistency_core.relationships.review import revalidate
 from consistency_pipeline.driver import JournalApplier
@@ -27,6 +29,7 @@ from consistency_pipeline.journal import JournalEntry
 from consistency_pipeline.lifecycle import (
     CloseReason,
     DetectionEvent,
+    DetectionMetrics,
     DetectionStatus,
     EventKind,
 )
@@ -168,7 +171,7 @@ def test_lifecycle_open_update_resolve_without_spam() -> None:
     assert h.engine.active_detections() == []
 
 
-def test_growing_maximum_is_an_update_and_shrinking_is_silent() -> None:
+def test_growing_maximum_updates_and_shrink_reports_current_capacity() -> None:
     h = Harness()
     _candidate(h)
     before = h.engine.active_detections()[0].max_capacity
@@ -179,10 +182,57 @@ def test_growing_maximum_is_an_update_and_shrinking_is_silent() -> None:
     assert before is not None and cap is not None and cap > before
     assert cap == grew[0].record.metrics.depth_supported_quantity
     shrank = h.send(snap(GE2, h.next_seq(), no=[("0.65", "100")]))
-    assert shrank == []
-    rec = h.engine.active_detections()[0]
+    assert _kinds(shrank) == ["UPDATED"]
+    rec = shrank[0].record
     assert rec.max_capacity == cap
-    assert rec.metrics.depth_supported_quantity == cap  # metrics of the last *event*
+    current = rec.metrics.depth_supported_quantity
+    assert current is not None and current < cap
+    assert h.engine.active_detections()[0].max_capacity == cap
+    assert h.engine.active_detections()[0].metrics.depth_supported_quantity == current
+    assert h.send(snap(GE2, h.next_seq(), no=[("0.65", "100")])) == []
+
+
+def _with_net_edge(ev: Evaluation, net: str) -> Evaluation:
+    quoted = ev.certificate.evaluation
+    assert quoted is not None
+    certificate = ev.certificate.model_copy(
+        update={"evaluation": quoted.model_copy(update={"net_profit": dec(net)})}
+    )
+    return ev.model_copy(update={"certificate": certificate})
+
+
+def test_decreasing_net_edge_reports_current_value_and_keeps_maximum() -> None:
+    """A later, smaller net edge is the current value. The historical maximum stays."""
+    h = Harness()
+    _candidate(h)
+    slot = h.engine._slots[h.key()]
+    base = slot.evaluation
+    assert base is not None and slot.detection is not None
+    higher = _with_net_edge(base, "0.10")
+    lower = _with_net_edge(base, "0.04")
+    higher_metrics = DetectionMetrics.of(higher)
+    slot.detection = slot.detection.model_copy(
+        update={
+            "max_deviation": higher_metrics.theoretical_deviation,
+            "max_capacity": higher_metrics.depth_supported_quantity,
+            "max_net_edge": dec("0.10"),
+            "metrics": higher_metrics,
+            "certificate_hash": higher.certificate_hash,
+        }
+    )
+    timing = h.events[-1].timing
+    decreased = h.engine._apply(slot, lower, h.now + 1, len(h.journal), timing)
+    assert _kinds(decreased) == ["UPDATED"]
+    rec = h.engine.active_detections()[0]
+    assert rec.metrics.net_edge == dec("0.04")
+    assert rec.max_net_edge == dec("0.10")
+    assert decreased[0].record.metrics.net_edge == dec("0.04")
+    assert decreased[0].record.max_net_edge == dec("0.10")
+    again = h.engine._apply(slot, lower, h.now + 2, len(h.journal) + 1, timing)
+    assert again == []
+    rec = h.engine.active_detections()[0]
+    assert rec.metrics.net_edge == dec("0.04")
+    assert rec.max_net_edge == dec("0.10")
 
 
 def test_sequence_gap_invalidates_immediately_and_duration_restarts() -> None:

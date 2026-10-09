@@ -43,10 +43,42 @@ def test_lifecycle_has_no_duplicates_or_spam() -> None:
     _, events, engine = _run()
     assert dict(Counter(e.kind.value for e in events)) == {
         "OPENED": 12,
-        "UPDATED": 39,
+        "UPDATED": 120,
         "EXPIRED": 7,
         "RESOLVED": 5,
     }
+    previous: dict[str, DetectionEvent] = {}
+    for event in events:
+        if event.kind is EventKind.UPDATED:
+            prior = previous[event.detection_id]
+            metrics = event.record.metrics
+            prior_metrics = prior.record.metrics
+            quote = (
+                metrics.theoretical_deviation,
+                metrics.gross_edge,
+                metrics.total_fees,
+                metrics.net_edge,
+                metrics.execution_adjusted_edge,
+                metrics.reported_quantity,
+                metrics.depth_supported_quantity,
+                metrics.worst_case_payoff,
+                event.record.classification,
+                event.record.reason_codes,
+            )
+            prior_quote = (
+                prior_metrics.theoretical_deviation,
+                prior_metrics.gross_edge,
+                prior_metrics.total_fees,
+                prior_metrics.net_edge,
+                prior_metrics.execution_adjusted_edge,
+                prior_metrics.reported_quantity,
+                prior_metrics.depth_supported_quantity,
+                prior_metrics.worst_case_payoff,
+                prior.record.classification,
+                prior.record.reason_codes,
+            )
+            assert quote != prior_quote
+        previous[event.detection_id] = event
     active: dict[str, str] = {}
     seqs: dict[str, int] = {}
     for e in events:

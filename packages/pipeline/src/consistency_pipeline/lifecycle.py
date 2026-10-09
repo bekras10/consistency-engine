@@ -4,8 +4,9 @@ A *detection* is one continuous run of signals for the same (relationship, strat
 strategy id encodes the portfolio direction (e.g. both equivalence directions are distinct
 strategies), so "same relationship and portfolio direction" is the strategy key.
 
-Statuses: ``OPEN`` (first signal), ``UPDATED`` (classification / reason codes changed, or a
-tracked maximum grew), and the terminal ``RESOLVED`` (the inconsistency disappeared on trusted,
+Statuses: ``OPEN`` (first signal), ``UPDATED`` (classification / reason codes changed, a
+tracked maximum grew, or a current quoted figure changed, including a decrease), and the
+terminal ``RESOLVED`` (the inconsistency disappeared on trusted,
 fresh data), ``EXPIRED`` (it can no longer be assessed: stale data, market not open, no asks,
 end of session) and ``INVALIDATED`` (its inputs became untrusted or its proof basis lapsed:
 unsynchronized/interrupted books, relationship invalidated or changed, market removed, restart).
@@ -239,6 +240,10 @@ class DetectionRecord(FrozenModel):
     event_count: int = 1
     certificate_hash: str
     """Certificate of the evaluation behind the latest OPENED / UPDATED event."""
+    certificate_json: str | None = None
+    """Canonical proof JSON for ``certificate_hash``. Checkpoints carry it so a restart can
+    restore this certificate instead of a later one or an empty field."""
+    certificate_version: str | None = None
     metrics: DetectionMetrics
     timing: TimingMeta
 

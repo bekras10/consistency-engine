@@ -423,9 +423,44 @@ hashes, and event order (63 events), and seek-via-checkpoint IDENTICAL.
 - Execution is never atomic across markets; certificates say so.
 - Host port 5432 may already be another Postgres. Compose reads `POSTGRES_PORT` (default 5432).
   This machine's integration run used Docker `postgres:16.15` published on **5433**.
-- Playback `step`/`seek` rebuild the prefix from the start (or from the checkpoint). That is
-  correct and fine for the bundled sessions; it is not a constant-time seek.
+- Backward playback seek rebuilds from the latest checkpoint at or before the target, then
+  applies the suffix once. Forward play does not replay entries already applied.
 - The Kalshi connector remains a refused skeleton. No Kalshi network access.
+
+## Hardening pass (post b39f3eb) — 2026-10-09
+
+Process per issue: regression first, confirmed failing on the pre-fix code, then the fix.
+Golden files were not edited: `git diff -- fixtures/golden tests/golden` is empty.
+Settlement, fee arithmetic, deterministic replay, and restart behaviour are unchanged.
+`UPDATED` on the bundled inconsistent recording is 120 rather than 39 because a change in the
+current quote (including a decrease) is now an update. `OPENED` 12, `EXPIRED` 7, and
+`RESOLVED` 5 are unchanged, and no update repeats an unchanged quote.
+
+| Issue | Regression | Pre-fix failure | Fix |
+|---|---|---|---|
+| P1 playback initialization | `test_fresh_and_restarted_playback_have_applied_zero_entries` | a new session's outcome already contained detection events while `cursor` was 0 (`_fresh(None, None)` replayed the recording) | construction and `restart` build an empty book manager, engine, and applier |
+| P1 playback complexity | `test_forward_playback_applies_each_entry_once_and_seek_backward_matches`, `test_start_and_resume_apply_each_entry_once` | a forward walk applied ordinals `0, 0, 1, 0, 1, 2, ...` (each step replayed the prefix) | one persistent `JournalApplier`; forward play and forward seek apply only new entries; backward seek restores the latest checkpoint at or before the target and applies the suffix once |
+| P2 journal flush | `test_failed_commit_preserves_buffer_and_next_flush_writes_once` | after `RuntimeError: commit failed` the buffer was `[]` | `BatchJournal.flush` drops the batch only after the commit returns |
+| P2 checkpoint certificate | `test_reconcile_restores_checkpoint_certificate_not_a_later_one` | reconcile left `certificate_json is None` | the detection record stores the certificate of the latest open/update; reconcile writes that JSON back and rebuilds legs and scenarios when it differs from the row |
+| P2 current metrics | `test_decreasing_net_edge_reports_current_value_and_keeps_maximum` | edge 0.10 then 0.04 emitted no update (`assert [] == ['UPDATED']`), so the stored quote stayed 0.10 | historical maxima stay maxima; the current quote is the latest economic figures; a repeated quote emits nothing; a real change, including a decrease, emits an update. Duration, freshness, and skew alone do not |
+| P2 migration integrity | `test_initial_revision_does_not_follow_orm_metadata`; `test_upgrade_downgrade_upgrade` on Postgres 16 | `0001_initial` called `Base.metadata.create_all` / `drop_all` | frozen `op.create_table`, indexes, constraints, and matching `drop_table` downgrade. The revision does not import the ORM |
+
+Phase 11 notifications are documented in [docs/architecture.md](docs/architecture.md) and are
+not implemented. The API process cannot subscribe to the worker's in-memory broker. The
+contract is an append-only `notification_outbox` (`id` cursor, `topic`, `session_id`,
+`payload`, `created_at`) written in the detection transaction, polled by the API, with
+resynchronization from the current `detections` rows. This pass does not create that table.
+
+Verification on this machine (Docker `postgres:16.15`, host port 5433): `make lint` clean,
+`make typecheck` clean (80 source files). Suites: unit 299 passed, golden 33 passed,
+property 24 passed, replay 11 passed, integration 8 passed. Total 375 passed, 0 failed,
+0 skipped.
+
+One pre-existing race, not one of the audited issues: `test_worker_graceful_stop_on_live_source_closes_detections`
+waits until an active detection has `event_count >= 2`, but the scripted live source reaches
+end-of-stream inside one 10 ms poll and closes that detection first. The same timeout happens
+with the pre-change engine. The wait now also accepts a detection that has already been
+updated and closed. The shutdown assertions are unchanged.
 
 ## How to resume Phase 10
 

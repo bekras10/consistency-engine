@@ -11,16 +11,16 @@ from collections.abc import Awaitable, Callable
 from decimal import Decimal
 from typing import Literal
 
+from consistency_connectors.ingestion import BookManager
 from consistency_core.fees import FeeCalculator
 from consistency_core.models.market import Market
 from consistency_core.models.relationship import Relationship
-from consistency_pipeline.checkpoint import Checkpoint
+from consistency_pipeline.checkpoint import Checkpoint, restore
+from consistency_pipeline.driver import JournalApplier
+from consistency_pipeline.engine import DetectionEngine
 from consistency_pipeline.journal import JournalEntry
-from consistency_pipeline.replay import (
-    ReplayOutcome,
-    latest_checkpoint_through,
-    replay_entries,
-)
+from consistency_pipeline.lifecycle import DetectionEvent
+from consistency_pipeline.replay import ReplayOutcome, latest_checkpoint_through
 
 PlaybackStatus = Literal["ready", "playing", "paused", "finished"]
 ALLOWED_SPEEDS: frozenset[Decimal] = frozenset(
@@ -61,7 +61,7 @@ class PlaybackSession:
         self._cursor = 0
         self._paused = False
         self._task: asyncio.Task[None] | None = None
-        self._outcome = self._fresh(None, None)
+        self._applier, self._outcome = self._blank()
 
     @property
     def cursor(self) -> int:
@@ -91,7 +91,7 @@ class PlaybackSession:
         self._stop_task()
         self._paused = False
         self._cursor = 0
-        self._outcome = self._fresh(None, None)
+        self._applier, self._outcome = self._blank()
         self.status = "ready"
 
     def step(self) -> bool:
@@ -101,17 +101,24 @@ class PlaybackSession:
         if self._cursor >= len(self.entries):
             self.status = "finished"
             return False
-        self._apply_through(self._cursor + 1)
+        self._apply_forward(self._cursor + 1)
         self.status = "finished" if self._cursor >= len(self.entries) else "paused"
         return True
 
     def seek(self, timestamp_ms: int) -> None:
-        """Jump to the state after every entry with ``now_ms <= timestamp_ms``."""
+        """Jump to the state after every entry with ``now_ms <= timestamp_ms``.
+
+        Seeking forward continues the live applier and does not replay entries already
+        applied. Seeking backward rebuilds from the latest checkpoint at or before the
+        target, then applies the following entries once.
+        """
         self.pause()
         self._stop_task()
-        checkpoint = latest_checkpoint_through(self._checkpoints, timestamp_ms)
-        self._outcome = self._fresh(checkpoint, timestamp_ms)
-        self._cursor = sum(1 for entry in self.entries if entry.now_ms <= timestamp_ms)
+        target = self._index_at(timestamp_ms)
+        if target >= self._cursor:
+            self._apply_forward(target)
+        else:
+            self._rebuild(timestamp_ms, target)
         self.status = "paused"
 
     def start(self) -> None:
@@ -133,32 +140,59 @@ class PlaybackSession:
         self.status = "playing"
         await self._run()
 
-    def _fresh(self, checkpoint: Checkpoint | None, through_ms: int | None) -> ReplayOutcome:
-        return replay_entries(
-            self.entries,
-            self._markets,
-            self._relationships,
-            self._fees,
-            session_id=self._session_id,
-            checkpoint=checkpoint,
-            through_ms=through_ms,
+    def _blank(self) -> tuple[JournalApplier, ReplayOutcome]:
+        """Books and detections with no journal entry applied."""
+        manager = BookManager(self._markets, source="replay")
+        engine = DetectionEngine(
+            manager, self._relationships, self._fees, session_id=self._session_id
         )
+        applier = JournalApplier(manager, engine)
+        return applier, ReplayOutcome(events=[], manager=manager, engine=engine)
 
-    def _apply_through(self, count: int) -> None:
-        """Replay from the start through ``count`` entries (isolated; no shared books)."""
-        if count <= 0:
-            self._cursor = 0
-            self._outcome = self._fresh(None, None)
-            return
-        prefix = self.entries[:count]
-        self._outcome = replay_entries(
-            prefix,
-            self._markets,
-            self._relationships,
-            self._fees,
-            session_id=self._session_id,
-        )
+    def _index_at(self, timestamp_ms: int) -> int:
+        """Prefix length of entries whose pipeline clock is ``<= timestamp_ms``.
+
+        Journal ordinals are processing order, so receipt time does not go backwards and
+        this count is the cursor after those entries.
+        """
+        count = 0
+        for entry in self.entries:
+            if entry.now_ms > timestamp_ms:
+                break
+            count += 1
+        return count
+
+    def _apply_forward(self, count: int) -> None:
+        """Apply ``entries[cursor:count]`` once on the persistent applier."""
+        if count < self._cursor:
+            raise ValueError("forward playback cannot rewind; seek backward instead")
+        for entry in self.entries[self._cursor : count]:
+            self._outcome.events.extend(self._applier.apply(entry))
         self._cursor = count
+
+    def _rebuild(self, timestamp_ms: int, target: int) -> None:
+        """Restore the latest checkpoint at or before ``timestamp_ms``, then apply once."""
+        checkpoint = latest_checkpoint_through(self._checkpoints, timestamp_ms)
+        if checkpoint is None:
+            applier, outcome = self._blank()
+            selected = [entry for entry in self.entries if entry.now_ms <= timestamp_ms]
+        else:
+            manager, engine = restore(checkpoint, self._fees)
+            applier = JournalApplier(manager, engine)
+            applier.last_ordinal = checkpoint.ordinal
+            outcome = ReplayOutcome(events=[], manager=manager, engine=engine)
+            selected = [
+                entry
+                for entry in self.entries
+                if entry.ordinal > checkpoint.ordinal and entry.now_ms <= timestamp_ms
+            ]
+        events: list[DetectionEvent] = []
+        for entry in selected:
+            events.extend(applier.apply(entry))
+        outcome.events.extend(events)
+        self._applier = applier
+        self._outcome = outcome
+        self._cursor = target
 
     async def _run(self) -> None:
         self.status = "playing"
@@ -172,7 +206,7 @@ class PlaybackSession:
                 if await self._wait(float(delay_ms) / 1000):
                     self.status = "paused"
                     return
-            self._apply_through(self._cursor + 1)
+            self._apply_forward(self._cursor + 1)
         self.status = "finished"
 
     async def _wait(self, seconds: float) -> bool:

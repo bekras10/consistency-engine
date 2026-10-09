@@ -27,6 +27,7 @@ from consistency_persistence.recording import (
     DetectionWriter,
     VersionStamp,
     latest_checkpoint,
+    replace_certificate_projection,
 )
 from consistency_persistence.reference import (
     upsert_catalog,
@@ -374,8 +375,22 @@ async def _reconcile(session: AsyncSession, session_id: str, checkpoint: Checkpo
         row = await session.get(DetectionRow, rec.detection_id)
         if row is None:
             session.add(_row_from_record(rec))
+            if rec.certificate_json is not None:
+                await session.flush()
+                await replace_certificate_projection(
+                    session, rec.detection_id, rec.certificate_json
+                )
             continue
-        if row.certificate_hash != rec.certificate_hash:
+        hash_differs = row.certificate_hash != rec.certificate_hash
+        if rec.certificate_json is not None:
+            stale = hash_differs or row.certificate_json != rec.certificate_json
+            row.certificate_json = rec.certificate_json
+            row.certificate_version = rec.certificate_version
+            if stale:
+                await replace_certificate_projection(
+                    session, rec.detection_id, rec.certificate_json
+                )
+        elif hash_differs:
             row.certificate_json = None
             row.certificate_version = None
             await session.execute(
@@ -444,7 +459,7 @@ def _row_from_record(rec: DetectionRecord) -> DetectionRow:
         max_net_edge=rec.max_net_edge,
         event_count=rec.event_count,
         certificate_hash=rec.certificate_hash,
-        certificate_json=None,
-        certificate_version=None,
+        certificate_json=rec.certificate_json,
+        certificate_version=rec.certificate_version,
         record_json=rec.model_dump(mode="json"),
     )

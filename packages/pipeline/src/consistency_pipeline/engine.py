@@ -475,6 +475,8 @@ class DetectionEngine:
                 max_net_edge=metrics.net_edge,
                 max_candidate_duration_ms=streak_ms,
                 certificate_hash=ev.certificate_hash,
+                certificate_json=ev.certificate_json(),
+                certificate_version=ev.certificate.certificate_version,
                 metrics=metrics,
                 timing=timing,
             )
@@ -502,7 +504,11 @@ class DetectionEngine:
             det.max_capacity,
             det.max_net_edge,
         )
-        if not (changed or grew):
+        # Clock fields (duration, freshness, skew) move on every sample. They are not a new
+        # observation of the candidate. A repeated current quote emits nothing; a real change,
+        # including a smaller net edge, does.
+        current_changed = _quoted(metrics) != _quoted(det.metrics)
+        if not (changed or grew or current_changed):
             slot.detection = det.model_copy(update=base)
             return []
         peak = max(det.peak_classification, ev.classification, key=lambda c: _RANK[c])
@@ -519,6 +525,8 @@ class DetectionEngine:
                 "update_count": det.update_count + 1,
                 "event_count": det.event_count + 1,
                 "certificate_hash": ev.certificate_hash,
+                "certificate_json": ev.certificate_json(),
+                "certificate_version": ev.certificate.certificate_version,
                 "metrics": metrics,
                 "timing": timing,
             }
@@ -665,6 +673,20 @@ def _timing_of(u: BookUpdate) -> TimingMeta:
         exchange_ts_ms=u.timing.exchange_ts_ms,
         received_ts_ms=u.timing.received_ts_ms,
         processing_started_ns=u.timing.processing_started_ns,
+    )
+
+
+def _quoted(metrics: DetectionMetrics) -> tuple[object, ...]:
+    """Latest economic figures. Historical maxima live on the detection, not here."""
+    return (
+        metrics.theoretical_deviation,
+        metrics.gross_edge,
+        metrics.total_fees,
+        metrics.net_edge,
+        metrics.execution_adjusted_edge,
+        metrics.reported_quantity,
+        metrics.depth_supported_quantity,
+        metrics.worst_case_payoff,
     )
 
 
