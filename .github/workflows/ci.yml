@@ -18,7 +18,9 @@ jobs:
       ENABLE_LIVE_TRADING: "false"
     services:
       postgres:
-        image: postgres:16
+        # Public ECR mirror of library/postgres. GitHub-hosted runners hit
+        # Docker Hub's unauthenticated pull limit on postgres:16.
+        image: public.ecr.aws/docker/library/postgres:16
         env:
           POSTGRES_USER: consistency
           POSTGRES_PASSWORD: consistency
