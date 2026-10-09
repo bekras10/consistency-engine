@@ -102,10 +102,11 @@ Phase 11's API runs in its own process. It cannot subscribe to the worker's in-m
 The broker remains the in-process fan-out only. Durable state is the `detections` row (legs,
 scenarios, and certificate JSON), committed before the worker publishes.
 
-The Phase 11 contract is an append-only `notification_outbox`. This pass does not create the
-table and does not add REST or SSE routes. The worker stays correct without it. The next phase
-adds the table in its own explicit Alembic revision and writes one row in the same transaction
-as the detection change:
+The Phase 11 contract is an append-only `notification_outbox`, created by Alembic revision
+`0002_notification_outbox` (not `create_all`). `DetectionWriter` inserts one row in the same
+transaction as the detection, its legs, its scenarios, and its certificate. The worker's
+in-memory broker is unchanged. The public API tails this table; it does not subscribe to
+the worker process.
 
 | column | type | role |
 |---|---|---|
@@ -115,11 +116,12 @@ as the detection change:
 | `payload` | `jsonb` not null | the same document the broker publishes |
 | `created_at` | `timestamptz` not null | insert time; not used for ordering |
 
-The API polls `WHERE id > :cursor ORDER BY id`. Clients resume with `Last-Event-ID` set to that
-`id`. On startup, a gap, or a lagged cursor, the API resynchronizes from `detections` (the
-current row, not a reconstructed history) and then tails the outbox from the greatest `id`
-observed when that read began. Polling `detections` alone is not an event log: an update
-overwrites the row. The outbox is the tail; the detection table is the snapshot.
+Clients resume with `Last-Event-ID` set to an outbox `id`. On connect, and when that id is
+no longer a contiguous boundary, `GET /api/v1/stream` sends a `resync` event built from the
+current `detections` rows (the latest row per detection, not a reconstructed history) and
+then tails the outbox. Polling `detections` alone is not an event log: an update overwrites
+the row. The outbox is the tail; the detection table is the snapshot. The dashboard still
+polls `/app-data` until a page is switched to this stream.
 
 ### Concurrent commit order
 
@@ -138,22 +140,36 @@ Waiting for the missing integer is not enough either. A rollback leaves a perman
 a consumer that blocks until every id arrives will stall. A `created_at` delay does not fix
 it: that column is insert time, not commit time.
 
-Phase 11 has to close this before `id` is a resume token. Either serialize outbox inserts so
-the next id is taken only after the previous outbox transaction commits (one writer, or a
-transaction-scoped advisory lock held from the insert through commit), or poll with a
-visibility rule that does not treat the highest visible id as a safe cursor. In the second
-shape, advance only through ids whose transactions are known to have committed (a snapshot
-such as `pg_current_snapshot()` can show which writers are still in progress) and do not
-move the cursor across a hole that might still commit. A hole whose transaction aborted has
-to be recognized as gone. The `detections` row stays the resynchronization snapshot when the
-tail is uncertain. This pass still does not create the table.
+The reader does not treat the highest visible id as a safe cursor. `committed_notifications`
+loads the visible rows and `pg_snapshot_xip(pg_current_snapshot())` in one statement, then
+`select_contiguous` walks ids upward from the cursor:
+
+- The next id is delivered when it is exactly `cursor + 1`.
+- If an id is missing and any other transaction is still in progress, the reader stops.
+  A higher committed id is held until the gap commits or that transaction ends. The higher
+  id is not delivered in a way that moves the cursor past the missing one.
+- If an id is missing and the snapshot shows no in-progress transaction, the hole's
+  transaction aborted (a rollback does not return the `BIGSERIAL` value). The hole is
+  skipped and later committed ids are delivered.
+
+`created_at` stays the insert time and is not a cursor. The `detections` row stays the
+resynchronization snapshot when the tail is uncertain. SSE `id:` is the outbox id.
+Reconnecting with `Last-Event-ID` replays that boundary event so a client can apply it
+idempotently; events after it are not skipped. See `docs/api-reference.md`.
 
 ## Dashboard
 
 Phase 10's Next.js app reads PostgreSQL through `consistency_persistence`. A local gateway
 process (`scripts/dashboard_gateway.py`, `/internal/...`) holds that access and one
 `PlaybackService`. The browser talks only to Next routes under `/app-data`, which proxy the
-gateway, and polls those routes. The pages label the refresh as polling. There is no SSE
-stream and no public `/api/v1` catalog; both are Phase 11. Prices stay fixed-point strings.
+gateway, and polls those routes. The pages label the refresh as polling. That gateway is an
+internal adapter in front of the same `dashboard.py` reads and `ReplayHost` the public
+`/api/v1` routes use, so the two surfaces do not keep separate calculations. The gateway
+still keys one in-process playback session by the recording id (the dashboard's single
+viewer). `POST /api/v1/replay/sessions/{id}/start` forks a new viewer id instead, so two API
+clients can seek independently without writing the canonical journal.
+
+`GET /api/v1/stream` is the SSE tail. The dashboard keeps polling until a page is switched
+over; a failed poll still keeps the last successful payload. Prices stay fixed-point strings.
 A depth chart scales those strings to integers for pixel positions and labels the axis from
 the same scale.

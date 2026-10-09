@@ -509,16 +509,17 @@ is stopped. That disconnected journey is a second spec because the first paint i
 and does not go through the browser's network stack. Playwright is local. CI runs frontend lint,
 typecheck, Vitest, and `next build`. It does not start Postgres plus Next plus Chromium for e2e.
 
-### Still incomplete (Phase 11 and later)
+### Still incomplete (Phase 12 and later)
 
-- Public `/api/v1/markets`, `/api/v1/detections`, `/api/v1/stream`, and the other versioned
-  catalog and replay routes. Replay stays on the internal gateway.
-- SSE or WebSocket. The UI polls and says so. A failed poll keeps the last successful payload
-  and reports stale or error instead of reverting to the first server render.
-- The `notification_outbox` table, with commit-order safety as written in `docs/architecture.md`.
 - `make benchmark` and deployment images.
+- The dashboard still polls `/app-data`. `GET /api/v1/stream` is the SSE tail; pages are not
+  switched onto it. A failed poll keeps the last successful payload.
 - Market depth on a detection page is the latest journal book, not the book at first observation.
   Replay is the cursor-accurate book.
+- Public GET routes are open on a local deployment. Replay mutations require `X-Replay-Token`.
+  Viewer cursors are in the API process and disappear when that process restarts.
+- Sessions recorded before the reference snapshot have no `session-reference` row and fall
+  back to the current catalog.
 
 ## Phase 10 correctness — 2026-10-09
 
@@ -537,9 +538,29 @@ Added `fixtures/golden/depth-multilevel.yaml` and `tests/golden/test_depth_chart
 
 Verification on this machine (Docker `postgres:16.15`, host port 5433): `make lint` clean, `make typecheck` clean (83 source files). `make test` 388 passed, 0 failed, 0 skipped. Suites: unit 307, golden 34, property 24, replay 11, integration 12. Frontend: eslint clean, `tsc --noEmit` clean, Vitest 6 passed, `next build` succeeded. `scripts/e2e.sh`: dashboard spec 1 passed, disconnected spec 1 passed.
 
-## How to resume Phase 11
+## Phase 11 — public API — 2026-10-09
 
-Add the public read API and the SSE stream from the outbox contract in `docs/architecture.md`.
-Do not treat `BIGSERIAL` assignment order as commit order. The dashboard can later subscribe
-instead of polling `/app-data`; until then the polling label stays.
+`/api/v1` reads the same `dashboard.py` functions and `ReplayHost` as the gateway. The gateway
+stays the dashboard's internal adapter. `POST /api/v1/replay/sessions/{id}/start` forks a
+viewer id so two clients can seek the same recording independently. Mutations require
+`X-Replay-Token` (`REPLAY_API_TOKEN`); `REPLAY_MUTATIONS_PUBLIC` defaults off. GET stays open
+for a local deployment.
+
+`notification_outbox` is Alembic `0002_notification_outbox`. The detection transaction inserts
+the outbox row. Readers walk a contiguous committed prefix and hold a higher id while
+`pg_snapshot_xip(pg_current_snapshot())` shows an in-progress transaction. An aborted hole is
+skipped only after no other transaction is open. `GET /api/v1/stream` sends `resync` from
+current detection rows, then tails the outbox. `Last-Event-ID` replays that boundary event.
+Contract: `docs/api-reference.md`.
+
+Verification on this machine (Docker `postgres:16.15`, host port 5433): `make lint` clean,
+`make typecheck` clean (86 source files). `make test` 401 passed, 0 failed, 0 skipped.
+Suites: unit 313, golden 34, property 24, replay 11, integration 19. Frontend: eslint clean,
+`tsc --noEmit` clean, Vitest 6 passed, `next build` succeeded. `scripts/e2e.sh`: dashboard
+spec 1 passed, disconnected spec 1 passed.
+
+## How to resume Phase 12
+
+The benchmark harness and deployment images are still out of scope. Do not add Kalshi network
+calls. The dashboard can subscribe to `GET /api/v1/stream` later; polling remains the fallback.
 

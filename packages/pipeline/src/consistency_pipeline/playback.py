@@ -78,6 +78,26 @@ class PlaybackSession:
     def outcome(self) -> ReplayOutcome:
         return self._outcome
 
+    @property
+    def recording_id(self) -> str:
+        return self._session_id
+
+    def isolated_copy(self, replay_id: str) -> PlaybackSession:
+        """Another viewer of this recording, starting at the beginning.
+
+        The copy does not share the book manager, detection engine, or cursor.
+        """
+        return PlaybackSession(
+            replay_id,
+            list(self.entries),
+            self._markets,
+            list(self._relationships),
+            self._fees,
+            session_id=self._session_id,
+            checkpoints=list(self._checkpoints),
+            sleep=self._sleep,
+        )
+
     def set_speed(self, speed: Decimal | str | int) -> Decimal:
         self.speed = parse_speed(speed)
         return self.speed

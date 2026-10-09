@@ -1,12 +1,15 @@
-"""In-process replay sessions for the dashboard.
+"""In-process replay sessions for the dashboard and the public API.
 
-The gateway keeps one :class:`PlaybackService`. HTTP handlers call it directly.
-This is not the Phase 11 ``POST /api/v1/replay`` catalog.
+The gateway keeps one :class:`PlaybackService` and keys a recording by its
+ingestion session id (one dashboard viewer). ``ReplayHost.fork`` copies that
+recording into a new viewer id so two public-API clients can seek independently.
+Neither path writes the canonical journal.
 """
 
 from __future__ import annotations
 
 import asyncio
+import uuid
 from decimal import Decimal
 from typing import Any, cast
 
@@ -364,6 +367,7 @@ def snapshot(session: PlaybackSession) -> dict[str, Any]:
         "timeline": _timeline(session),
         "sync": sync_summary(manager),
         "transport": "polling",
+        "recording_id": session.recording_id,
     }
 
 
@@ -390,6 +394,16 @@ class ReplayHost:
                 loaded = await _load_playback(session, replay_id)
             return self.service.open(loaded)
 
+    async def fork(
+        self, sessions: async_sessionmaker[AsyncSession], recording_id: str
+    ) -> PlaybackSession:
+        """Open a new viewer on ``recording_id`` without moving any other cursor."""
+        async with self._lock:
+            async with sessions() as session:
+                loaded = await _load_playback(session, recording_id)
+            viewer = loaded.isolated_copy("viewer-" + uuid.uuid4().hex)
+            return self.service.open(viewer)
+
     async def command(
         self,
         sessions: async_sessionmaker[AsyncSession],
@@ -398,7 +412,19 @@ class ReplayHost:
         body: dict[str, object] | None = None,
     ) -> dict[str, Any]:
         playback = await self.ensure(sessions, replay_id)
-        payload = body or {}
+        self._apply(playback, action, body or {})
+        return snapshot(playback)
+
+    def command_existing(
+        self, replay_id: str, action: str, body: dict[str, object] | None = None
+    ) -> dict[str, Any]:
+        """Mutate a viewer that ``fork`` already opened. Does not load a recording."""
+        playback = self.service.get(replay_id)
+        self._apply(playback, action, body or {})
+        return snapshot(playback)
+
+    def _apply(self, playback: PlaybackSession, action: str, payload: dict[str, object]) -> None:
+        replay_id = playback.replay_id
         if action == "start":
             self.service.start(replay_id)
         elif action == "pause":
@@ -425,4 +451,3 @@ class ReplayHost:
             self.service.set_speed(replay_id, Decimal(raw_speed))
         else:
             raise ValueError(f"unknown replay action {action}")
-        return snapshot(playback)

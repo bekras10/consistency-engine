@@ -49,6 +49,7 @@ SPEC_TABLES: tuple[str, ...] = (
     "replay_sessions",
     "system_health",
     "configuration_versions",
+    "notification_outbox",
 )
 CHECKPOINT_TABLE = "session_checkpoints"
 
@@ -381,6 +382,18 @@ class ReplaySessionRow(Base):
     position_ms: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class NotificationOutboxRow(Base):
+    """Append-only detection tail. ``id`` is assigned at insert, not at commit."""
+
+    __tablename__ = "notification_outbox"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    topic: Mapped[str] = mapped_column(Text, nullable=False)
+    session_id: Mapped[str | None] = mapped_column(Text)
+    payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class SystemHealthRow(Base):

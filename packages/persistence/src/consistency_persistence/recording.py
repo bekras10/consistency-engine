@@ -1,7 +1,8 @@
 """Journal batches, detection transactions, and checkpoints.
 
 Book rows are inserted in bounded batches (one transaction per flush). A detection batch
-writes the detection, its legs, its scenarios, and the certificate v2 JSON in one transaction.
+writes the detection, its legs, its scenarios, the certificate v2 JSON, and one
+notification-outbox row in one transaction.
 """
 
 from __future__ import annotations
@@ -17,10 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from consistency_core.events import OrderBookSnapshotEvent
 from consistency_core.pricing.certificate import ProofCertificate
 from consistency_core.serialization import canonical_json
+from consistency_persistence.dashboard import json_ready
 from consistency_persistence.schema import (
     DetectionLegRow,
     DetectionRow,
     DetectionScenarioRow,
+    NotificationOutboxRow,
     OrderbookSnapshotRow,
     OrderbookUpdateRow,
     SessionCheckpointRow,
@@ -29,6 +32,7 @@ from consistency_persistence.timeutil import ms_to_dt, now_utc
 from consistency_pipeline.checkpoint import Checkpoint
 from consistency_pipeline.journal import JournalEntry
 from consistency_pipeline.lifecycle import DetectionEvent, DetectionRecord
+from consistency_pipeline.serialize import DETECTION_TOPIC, detection_event_payload
 
 
 class VersionStamp:
@@ -223,10 +227,20 @@ async def _apply_event(session: AsyncSession, ev: DetectionEvent) -> None:
             if key == "certificate_version" and value is None:
                 continue
             setattr(existing, key, value)
-    if ev.evaluation is None:
-        return
-    await replace_certificate_projection(
-        session, rec.detection_id, ev.evaluation.certificate_json()
+    if ev.evaluation is not None:
+        await replace_certificate_projection(
+            session, rec.detection_id, ev.evaluation.certificate_json()
+        )
+    payload = json_ready(detection_event_payload(ev))
+    if not isinstance(payload, dict):
+        raise TypeError("outbox payload must be an object")
+    session.add(
+        NotificationOutboxRow(
+            topic=DETECTION_TOPIC,
+            session_id=rec.session_id,
+            payload=payload,
+            created_at=now_utc(),
+        )
     )
 
 

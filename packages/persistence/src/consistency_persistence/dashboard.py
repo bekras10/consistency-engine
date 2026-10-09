@@ -665,7 +665,13 @@ async def get_relationship(session: AsyncSession, relationship_id: str) -> dict[
     }
 
 
-async def list_detections(session: AsyncSession, query: DetectionQuery) -> dict[str, object]:
+async def list_detections(
+    session: AsyncSession,
+    query: DetectionQuery,
+    *,
+    limit: int = 500,
+    offset: int = 0,
+) -> dict[str, object]:
     stmt = select(DetectionRow)
     if query.classification:
         stmt = stmt.where(DetectionRow.classification == query.classification)
@@ -695,11 +701,13 @@ async def list_detections(session: AsyncSession, query: DetectionQuery) -> dict[
             continue
         items.append(_detection_item(row, rel_type, figures))
     ordered = _sort_items(items, query)
-    truncated = len(ordered) > 500
+    page = ordered[offset : offset + limit]
     return {
-        "detections": ordered[:500],
+        "detections": page,
         "total": len(ordered),
-        "truncated": truncated,
+        "truncated": offset + len(page) < len(ordered),
+        "limit": limit,
+        "offset": offset,
         "classifications": sorted({row.classification for row in rows}),
         "relationship_types": sorted(set(types.values())),
     }
