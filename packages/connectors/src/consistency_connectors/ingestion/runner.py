@@ -12,6 +12,9 @@ any further market-data message, via the non-blocking ``CoalescingQueue.put_urge
 * end of stream of a live source (``stream_is_finite`` false) -> ``END_OF_STREAM``, stops FAILED
   (the end of a finite recording is expected and does not desync);
 * any other exception from the source -> ``SOURCE_ERROR``, stops FAILED (never hangs);
+* ``source.request_recovery`` raising, or not returning within ``recovery_timeout_s`` ->
+  ``RECOVERY_FAILED`` for every requested market and every market on every connection seen;
+  stops FAILED without processing any further message;
 * cancellation of :meth:`IngestionRunner.run` -> ``RUNNER_STOPPED``.
 
 Every recovery request from the manager is forwarded to ``source.request_recovery``. Updates are
@@ -26,7 +29,11 @@ import random
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 
-from consistency_connectors.base import MarketDataSource, SourceAuthenticationError
+from consistency_connectors.base import (
+    MarketDataSource,
+    RecoveryRequest,
+    SourceAuthenticationError,
+)
 from consistency_connectors.ingestion.book_manager import BookManager, BookUpdate, DesyncReason
 from consistency_connectors.ingestion.queues import CoalescingQueue, merge_book_updates
 from consistency_core.events import ConnectionEvent, StreamMessage
@@ -73,6 +80,7 @@ class RunnerStats:
     reconnect_attempts: int = 0
     heartbeat_timeouts: int = 0
     recovery_requests: int = 0
+    recovery_failures: int = 0
     messages: int = 0
     inbound_high_water: int = 0
     desyncs_published: int = 0
@@ -90,12 +98,14 @@ class IngestionRunner:
         heartbeat_timeout_s: float | None = 10.0,
         backoff: Backoff | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        recovery_timeout_s: float | None = 30.0,
     ) -> None:
         self.source = source
         self.manager = manager
         self.updates = updates
         self.inbound: asyncio.Queue[_Inbound] = asyncio.Queue(inbound_maxsize)
         self.heartbeat_timeout_s = heartbeat_timeout_s
+        self.recovery_timeout_s = recovery_timeout_s
         self.backoff = backoff or Backoff()
         self._sleep = sleep
         self.stats = RunnerStats()
@@ -198,4 +208,26 @@ class IngestionRunner:
                 await self.updates.put(update.market_id, update, merge=merge_book_updates)
             for req in self.manager.drain_recovery_requests():
                 self.stats.recovery_requests += 1
+                if not await self._request_recovery(req):
+                    return
+
+    async def _request_recovery(self, req: RecoveryRequest) -> bool:
+        """Forward one request; on any failure fail closed and return False."""
+        try:
+            if self.recovery_timeout_s is None:
                 await self.source.request_recovery(req)
+            else:
+                await asyncio.wait_for(self.source.request_recovery(req), self.recovery_timeout_s)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self.stats.recovery_failures += 1
+            self.stats.errors.append(type(exc).__name__)
+            self.failed = f"recovery failed: {type(exc).__name__}: {exc}"
+            reason = DesyncReason.RECOVERY_FAILED
+            for update in self.manager.recovery_failed(req, reason):
+                self.updates.put_urgent(update.market_id, update, merge=merge_book_updates)
+                self.stats.desyncs_published += 1
+            self._publish_loss(reason)
+            return False
+        return True

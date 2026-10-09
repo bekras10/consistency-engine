@@ -246,6 +246,7 @@ No golden expectation (fixtures A–J, `tests/golden/*`, official fee examples) 
 | P2 trusted freshness | `test_trusted_freshness.py` (13) | duplicate / gapped / rejected / stale-sid messages advanced confirmed-through by 60 s; a book 1 ms in the future evaluated `FEE_ADJUSTED_CANDIDATE` with age −1 | dd02c45 |
 | P2 evidence-bearing certificates | `test_certificate_evidence.py` (23, incl. re-derivation for all 12 golden cases) | certificate had no `verification` / `config_hash` / `fee_schedules` / `validation` / `payoff.scenario_specs` | aaa1352 |
 | P2 approximate optimisation | `tests/property/test_breakpoint_search.py` (10, Hypothesis + seeded sweeps) | large domains labelled only `BREAKPOINT_APPROXIMATE`; the 3 recorded cases misclassified `DEPTH_SUPPORTED` (exhaustive: `FEE_ADJUSTED_CANDIDATE`) | 6914aad |
+| P2 recovery failure fails closed (milestone 2, first commit) | `test_recovery_failure.py` (4) | `request_recovery` raising: the exception escaped `IngestionRunner.run()` and no `RECOVERY_FAILED` desync was published; a recovery that never returned hung `run()` forever (C was only desynced on cancellation, as `RUNNER_STOPPED`) | see git log |
 
 Fix summaries:
 

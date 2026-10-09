@@ -66,7 +66,10 @@ market data: in-stream faults (`SEQUENCE_GAP`, `MALFORMED_MESSAGE:*`, `INVALID_*
 `NEGATIVE_QUANTITY`, `CROSSED_BOOK`, `FUTURE_TIMESTAMP`, `CONNECTION_LOST` events) and runner
 failures (`CONNECTION_LOST`, `HEARTBEAT_TIMEOUT`, `RECONNECT_EXHAUSTED`, `AUTHENTICATION_FAILED`,
 `END_OF_STREAM` for live sources, `SOURCE_ERROR` for any other source exception,
-`RUNNER_STOPPED` on cancellation). The coalescing queue keeps the newest update per market in
+`RECOVERY_FAILED` when `request_recovery` raises or exceeds `recovery_timeout_s` — every
+requested market is re-published even if it was already UNSYNCHRONIZED, every market on the
+connection is desynchronized, and the runner stops FAILED without processing further messages —
+and `RUNNER_STOPPED` on cancellation). The coalescing queue keeps the newest update per market in
 processing order, so a desync is only ever superseded by a *later* state of that market; runner
 desyncs use a non-blocking `put_urgent` (never dropped, may exceed `maxsize` by at most the
 number of markets), and a resynchronized update that replaced an unconsumed desync carries

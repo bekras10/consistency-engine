@@ -73,6 +73,7 @@ class DesyncReason:
     SOURCE_ERROR = "SOURCE_ERROR"
     RUNNER_STOPPED = "RUNNER_STOPPED"
     FUTURE_TIMESTAMP = "FUTURE_TIMESTAMP"
+    RECOVERY_FAILED = "RECOVERY_FAILED"
 
 
 DEFAULT_MAX_FUTURE_MS = 1_000
@@ -372,6 +373,31 @@ class BookManager:
         )
         received = self.last_received_ts_ms if self.last_received_ts_ms is not None else 0
         return self._build_updates(items, self.last_position, None, received, started)
+
+    def recovery_failed(self, request: RecoveryRequest, reason: str) -> list[BookUpdate]:
+        """The source could not honour ``request``: the requested books can never be restored
+        on that connection. Every market on the connection is desynchronized, and every
+        requested market is (re)published as UNSYNCHRONIZED with ``reason`` even if it already
+        was, so consumers learn that no recovery is coming."""
+        started = self._clock_ns()
+        items: list[tuple[str, str, str | None]] = []
+        if request.connection_id is not None:
+            items.extend(self.mark_connection_lost(request.connection_id, reason))
+        listed = {mid for mid, _, _ in items}
+        for mid in sorted(set(request.market_ids) - listed):
+            st = self._markets.get(mid)
+            if st is None:
+                continue
+            self._desync(mid, reason, request.connection_id)
+            st.reason = reason
+            items.append((mid, "desync", reason))
+        self._recovery.pop(request.connection_id, None)
+        received = self.last_received_ts_ms if self.last_received_ts_ms is not None else 0
+        return self._build_updates(items, self.last_position, None, received, started)
+
+    def sync_reason(self, market_id: str) -> str | None:
+        """Why the market is not SYNCHRONIZED (None when it is, or before any snapshot)."""
+        return self._markets[market_id].reason
 
     # ------------------------------------------------------------------ handlers
     def _desync(self, market_id: str, reason: str, connection_id: str | None) -> bool:
