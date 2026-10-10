@@ -141,16 +141,21 @@ a consumer that blocks until every id arrives will stall. A `created_at` delay d
 it: that column is insert time, not commit time.
 
 The reader does not treat the highest visible id as a safe cursor. `committed_notifications`
-loads the visible rows and `pg_snapshot_xip(pg_current_snapshot())` in one statement, then
+loads the visible rows and the outbox write-lock check in one statement, then
 `select_contiguous` walks ids upward from the cursor:
 
 - The next id is delivered when it is exactly `cursor + 1`.
-- If an id is missing and any other transaction is still in progress, the reader stops.
-  A higher committed id is held until the gap commits or that transaction ends. The higher
-  id is not delivered in a way that moves the cursor past the missing one.
-- If an id is missing and the snapshot shows no in-progress transaction, the hole's
-  transaction aborted (a rollback does not return the `BIGSERIAL` value). The hole is
-  skipped and later committed ids are delivered.
+- If an id is missing and another backend holds a write lock on `notification_outbox`,
+  the reader stops. That transaction can still commit the missing id. A higher committed
+  id is held until the lock clears. It is not delivered in a way that moves the cursor
+  past the missing one.
+- If an id is missing and no such lock is held, the hole's transaction aborted. The hole
+  is skipped. An open transaction that has not locked this table cannot be assigned an id
+  that `nextval` already consumed, so unrelated work does not stall the tail.
+
+Outbox ids are allocated only by `INSERT` into `notification_outbox`. That statement takes
+`RowExclusiveLock` before the new id is visible to other sessions, and the lock lasts until
+commit or abort.
 
 `created_at` stays the insert time and is not a cursor. The `detections` row stays the
 resynchronization snapshot when the tail is uncertain. SSE `id:` is the outbox id.
@@ -164,12 +169,25 @@ process (`scripts/dashboard_gateway.py`, `/internal/...`) holds that access and 
 `PlaybackService`. The browser talks only to Next routes under `/app-data`, which proxy the
 gateway, and polls those routes. The pages label the refresh as polling. That gateway is an
 internal adapter in front of the same `dashboard.py` reads and `ReplayHost` the public
-`/api/v1` routes use, so the two surfaces do not keep separate calculations. The gateway
-still keys one in-process playback session by the recording id (the dashboard's single
-viewer). `POST /api/v1/replay/sessions/{id}/start` forks a new viewer id instead, so two API
-clients can seek independently without writing the canonical journal.
+`/api/v1` routes use, so the two surfaces do not keep separate calculations. `POST /internal/replay/{id}/start` and `POST /api/v1/replay/sessions/{id}/start` both fork a
+viewer id. Two dashboard tabs and two API clients can seek the same recording without
+sharing a cursor and without writing the canonical journal. A gateway bound to loopback
+trusts the Next.js process; the browser-facing `/app-data` proxy requires `X-Replay-Token`
+on every replay POST. A gateway bound to any other address requires that token itself.
 
-`GET /api/v1/stream` is the SSE tail. The dashboard keeps polling until a page is switched
-over; a failed poll still keeps the last successful payload. Prices stay fixed-point strings.
+Viewers idle for `REPLAY_SESSION_TTL_S` (default 1800 seconds) are dropped and their
+playback tasks are cancelled. A viewer read or commanded inside that window stays, including
+one that is still playing. `REPLAY_MAX_VIEWERS` (default 32) rejects another open with
+`429`.
+
+`GET /api/v1/stream` is the SSE tail. On connect it sends one `resync` whose detection rows
+and `outbox_id` come from a single repeatable-read snapshot, with no 10 000-row cap on the
+watermark. A commit that lands during that read is invisible to both and is delivered on
+the tail afterwards, so an older event is not applied on top of a newer snapshot. The
+stream emits `: heartbeat` comments (`SSE_HEARTBEAT_SECONDS`, default 15), refuses with
+`503` above `SSE_MAX_CONNECTIONS` (default 32), and stops a client that falls more than
+`SSE_QUEUE_MAX` frames behind (default 32). That client reconnects with `Last-Event-ID`.
+The dashboard keeps polling until a page is switched over; a failed poll still keeps the
+last successful payload. Prices stay fixed-point strings.
 A depth chart scales those strings to integers for pixel positions and labels the axis from
 the same scale.

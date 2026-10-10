@@ -45,8 +45,8 @@ id (`viewer-...`). Pause, seek, resume, restart, step, and speed use that viewer
 `PlaybackService` already isolates books by replay id; the fork is what keeps two clients
 that start the same recording off a shared cursor.
 
-Two dashboard tabs that go through the gateway still share one in-process session for that
-recording id. That is the single dashboard viewer, not the public API.
+The dashboard proxy does the same fork. Two browser tabs that start the same recording
+receive different `viewer-...` ids and do not share a cursor.
 
 | Method and path | Body | Effect |
 |---|---|---|
@@ -58,10 +58,14 @@ recording id. That is the single dashboard viewer, not the public API.
 | `POST .../seek` | `{"timestamp_ms": <integer>}` | State after every entry with `now_ms` at or before that time. |
 | `POST .../speed` | `{"speed": "0.5" \| "1" \| "2" \| "5" \| "10"}` | Fixed-point string. A JSON number is `422`. |
 
-The gateway already exposes the same actions on `/internal/replay/{id}/{action}` for the
-dashboard viewer. None of these controls are gateway-only.
+The gateway exposes the same actions on `/internal/replay/{id}/{action}`. A recording id
+forks a viewer. None of these controls are gateway-only.
 
-Viewer cursors live in the API process. A restart drops them; the recording does not.
+Viewer cursors live in the process that opened them. A restart drops them; the recording
+does not. Idle viewers expire after `REPLAY_SESSION_TTL_S` seconds (default 1800). A viewer
+that was read or commanded inside that window is not evicted, even if playback is still
+running. An idle viewer's task is cancelled. More than `REPLAY_MAX_VIEWERS` open viewers
+(default 32) is `429` `replay_capacity`.
 
 ### Authentication
 
@@ -74,6 +78,13 @@ for a closed local demo. GET reads stay open either way, under the localhost ass
 above.
 
 `401` body: `{"error":"unauthorized"}`.
+
+The Next.js route `POST /app-data/replay/...` checks the same header before it proxies.
+A request that omits the token does not reach playback. The replay page sends the token
+from `REPLAY_API_TOKEN` so the local dashboard can operate. `GET` stays open.
+
+If `DASHBOARD_GATEWAY_HOST` is not loopback (`127.0.0.1`, `::1`, or `localhost`), the
+gateway requires the token on its own replay posts. The default bind is `127.0.0.1`.
 
 ## Stream
 
@@ -113,16 +124,28 @@ order. Two overlapping transactions can take ids 10 and 11, and 11 can commit fi
 that advances to 11 would lose 10 when it commits. A rollback of 10 leaves a permanent hole,
 so blocking until every integer appears would stall.
 
-`committed_notifications` shares one snapshot between the visible rows and
-`pg_snapshot_xip(pg_current_snapshot())`. It delivers only the contiguous committed prefix.
-While any other transaction is in progress, a missing id stops the walk and a higher
-committed id is held. When no other transaction is in progress, a missing id is an aborted
-hole and is skipped. `created_at` is not used to order or delay delivery.
+`committed_notifications` shares one snapshot between the visible rows and a check for
+write locks on `notification_outbox` (`RowExclusiveLock` and stronger). It delivers only
+the contiguous committed prefix. A missing id is held only while another transaction holds
+one of those locks, because that transaction can still commit the id. An unrelated open
+transaction does not. When the lock is gone, a missing id is an aborted hole and is skipped.
+`created_at` is not used to order or delay delivery.
+
+`resync` reads the detection rows and `contiguous_watermark` in one repeatable-read
+transaction. The watermark is the contiguous high-water mark, not a 10 000-row prefix.
+A commit that arrives during the read is not mixed into that snapshot.
 
 ## Limits and browsers
 
 - About 240 requests per minute per client address on `/api/v1`, excluding the health probes.
   Excess is `429` `{"error":"rate_limited"}`.
+- `GET /api/v1/stream` allows `SSE_MAX_CONNECTIONS` (default 32). The next client gets `503`
+  `{"error":"stream_unavailable"}`.
+- Idle streams send a `: heartbeat` comment every `SSE_HEARTBEAT_SECONDS` (default 15) so a
+  proxy does not close a quiet socket.
+- Each stream queues at most `SSE_QUEUE_MAX` frames (default 32). A slower client is
+  disconnected instead of growing that queue. Reconnect with `Last-Event-ID`.
+- Replay viewers: `REPLAY_MAX_VIEWERS` (default 32) and `REPLAY_SESSION_TTL_S` (default 1800).
 - CORS origins come from `CORS_ORIGINS` (default `http://127.0.0.1:3000` and
   `http://localhost:3000`). Methods `GET`, `POST`, `OPTIONS`. Headers include
   `X-Replay-Token` and `Last-Event-ID`. Credentials are not allowed.

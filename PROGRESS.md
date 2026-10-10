@@ -559,8 +559,38 @@ Suites: unit 313, golden 34, property 24, replay 11, integration 19. Frontend: e
 `tsc --noEmit` clean, Vitest 6 passed, `next build` succeeded. `scripts/e2e.sh`: dashboard
 spec 1 passed, disconnected spec 1 passed.
 
-## How to resume Phase 12
+## Phase 12 — rigorous tests and audit fixes — 2026-10-10
 
-The benchmark harness and deployment images are still out of scope. Do not add Kalshi network
-calls. The dashboard can subscribe to `GET /api/v1/stream` later; polling remains the fallback.
+Five audit fixes. Existing golden expectations in `fixtures/golden` and `tests/golden` were
+not edited. No Alembic revision.
+
+| Issue | Regression | Pre-fix failure | Fix |
+|---|---|---|---|
+| Replay authentication | `test_public_api_and_gateway_reject_unauthorized_replay_posts`; `test_gateway_viewers_seek_independently`; `lib/replay-proxy.test.ts`; `scripts/check_replay_proxy.py` during `scripts/e2e.sh` | `/app-data` proxied replay POSTs with no token. A gateway bound beyond loopback did the same. Two dashboard starts of one recording shared one cursor | The Next proxy returns `401` before it fetches. A non-loopback gateway checks `X-Replay-Token`. `ReplayHost.mutate` forks a viewer. Dashboard reads use `preview` so a page load does not open the shared recording cursor |
+| SSE resynchronization | `test_resync_backlog_above_10000_matches_detection_snapshot`; `test_commit_during_resync_cannot_pair_a_new_snapshot_with_an_old_watermark` | watermark stopped at 10000 of 10001 (`assert 10000 == 10001`). A commit during the read paired detection status `4` with watermark version `3` | `_resync` uses one `REPEATABLE READ` snapshot. `contiguous_watermark` is SQL with no row cap. A commit during that read is invisible to both values |
+| Outbox liveness | `test_unrelated_transaction_does_not_stall_committed_notifications` (the overlapping-commit test `test_higher_outbox_id_waits_for_the_lower_commit` still passes) | an open `INSERT` into `system_health` made `writers` true and held a higher outbox id (`assert writers is False` failed) | the wait is a write lock on `notification_outbox` (`RowExclusiveLock` and stronger), not every in-progress transaction. A missing id is held only while that lock exists. After the lock is gone, an aborted hole is skipped |
+| Replay resource limits | `test_viewer_cap_rejects_another_session`; `test_expired_session_is_cancelled_and_a_live_session_stays` | viewers had no TTL, cap, or playback-task cancellation | `REPLAY_SESSION_TTL_S` default 1800, `REPLAY_MAX_VIEWERS` default 32. Idle expiry cancels the task. A viewer touched inside the TTL stays. Over the cap is `429` `replay_capacity` |
+| SSE reliability | `test_slow_consumer_stops_at_the_queue_cap`; `test_idle_stream_emits_a_heartbeat_comment`; `test_idle_stream_sends_heartbeat_and_over_cap_is_refused` | the tail had no heartbeat, no connection cap, and no bounded queue | `: heartbeat` every `SSE_HEARTBEAT_SECONDS` (default 15). Over `SSE_MAX_CONNECTIONS` (default 32) is `503` `stream_unavailable`. A full `SSE_QUEUE_MAX` (default 32) stops the producer; the client reconnects with `Last-Event-ID` |
+
+Also added, without changing existing expectations: `test_phase12_concurrency.py` (failed commit, retry, rollback, concurrent detection writes) and `test_worker_recovers_after_postgres_container_restart` (`docker restart` of the Postgres publishing `DATABASE_URL`, then the worker resumes the same session with no duplicate detection ids and no orphan legs). Hypothesis invariants 1–10 and golden fixtures A–J plus fee goldens were already present and were run unchanged. Historical replay (same recording twice, seek via checkpoint, recorded reference versions) was already covered.
+
+Verification on this machine (Docker `postgres:16.15`, host port 5433): `make lint` clean, `make typecheck` clean (87 source files). `make test` 413 passed, 0 failed, 0 skipped. Suites: unit 315, golden 34, property 24, replay 13, integration 27. Frontend: eslint clean, `tsc --noEmit` clean, Vitest 8 passed, `next build` succeeded. `scripts/e2e.sh` printed the proxy line `Replay proxy: 401 without a token; viewers ... seek to cursors 0 and 12277`, then Playwright `dashboard.spec.ts` 1 passed (14.5s) and `disconnected.spec.ts` 1 passed (122ms), then `Playwright passed, including the disconnected page.`
+
+GitHub Actions for the final push: recorded after that run finishes.
+
+### Remaining limitations
+
+- `make benchmark` still exits 2. No deployment images. Phase 13 has not been started.
+- The dashboard still polls `/app-data`. `GET /api/v1/stream` is the SSE tail; pages are not switched onto it.
+- Public GET routes stay open on a local deployment. The replay token is a shared local secret embedded in the replay page for the operator's browser, not a per-user login.
+- Viewer cursors live in the process that opened them and disappear on process restart.
+- A gateway bound to loopback trusts the Next server after the proxy has checked the token. A bind that is not loopback checks the token itself.
+- The outbox hold depends on `INSERT` into `notification_outbox` taking `RowExclusiveLock` before the new id is visible. That is the only id allocation path in this code.
+- A slow SSE client is disconnected when its queue fills. Events stay in the outbox for `Last-Event-ID`.
+- Market depth on a detection page is the latest journal book. Replay is the cursor-accurate book.
+- `BREAKPOINT_APPROXIMATE` remains the fallback when an exact breakpoint is not found. Fee schedules for real venues stay unverified. No Kalshi network calls.
+
+### Phase 13
+
+Ready for performance work only after this push's GitHub Actions run is green. The five fixes are in and the local suites above finished green.
 

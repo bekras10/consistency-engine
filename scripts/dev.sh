@@ -13,6 +13,9 @@ export DASHBOARD_GATEWAY_PORT="${DASHBOARD_GATEWAY_PORT:-8765}"
 export DASHBOARD_GATEWAY_URL="${DASHBOARD_GATEWAY_URL:-http://127.0.0.1:${DASHBOARD_GATEWAY_PORT}}"
 export WEB_PORT="${WEB_PORT:-3000}"
 export DATA_SOURCE="${DATA_SOURCE:-synthetic}"
+export DASHBOARD_GATEWAY_HOST="${DASHBOARD_GATEWAY_HOST:-127.0.0.1}"
+export REPLAY_API_TOKEN="${REPLAY_API_TOKEN:-local-replay-token}"
+export REPLAY_MUTATIONS_PUBLIC="${REPLAY_MUTATIONS_PUBLIC:-false}"
 
 if [[ ! -d apps/web/node_modules ]]; then
   echo "Frontend is not started: apps/web/node_modules is missing. Run npm install in apps/web." >&2
@@ -74,7 +77,7 @@ if [[ "$web_ok" != 1 ]]; then
 fi
 
 echo "Postgres, migrations, synthetic worker, dashboard gateway (${DASHBOARD_GATEWAY_URL}), and frontend (http://127.0.0.1:${WEB_PORT}) are running."
-echo "The UI polls the gateway. SSE is Phase 11."
+echo "The dashboard polls the gateway. The public stream is GET /api/v1/stream."
 while true; do
   for pid in "${pids[@]}"; do
     if ! kill -0 "$pid" 2>/dev/null; then
