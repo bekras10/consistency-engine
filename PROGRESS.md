@@ -584,7 +584,7 @@ running; the spec now waits for that response. The position assertion is unchang
 
 ### Remaining limitations (superseded in part by the remediation below)
 
-- `make benchmark` still exits 2. No deployment images. Phase 13 has not been started.
+- No deployment images. Phase 14 has not been started.
 - The dashboard still polls `/app-data`. `GET /api/v1/stream` is the SSE tail; pages are not switched onto it.
 - Public GET routes stay open on a local deployment.
 - Viewer cursors live in the process that opened them and disappear on process restart.
@@ -608,7 +608,27 @@ Golden expectations in `fixtures/golden` and `tests/golden` were not edited. Ale
 
 Verification on this machine (Docker `postgres:16.15`, host port 5433): `make lint` clean, `make typecheck` clean (87 source files). `make test` 420 passed, 0 failed, 0 skipped, in 86.01s. Suites: unit 316, golden 34, property 24, replay 14, integration 32. Frontend: eslint clean, `tsc --noEmit` clean, Vitest 10 passed, `next build` succeeded. `scripts/e2e.sh` (with `E2E_SKIP_COMPOSE=1` and `DATABASE_URL` on port 5433) printed `Replay proxy: 401 without a token; viewers viewer-c02f4646f15d466f99e78aa3153f9d43 and viewer-b9f62d56f32741a2860ec6c4b6bd1563 seek to cursors 0 and 12277.`, then Playwright `dashboard.spec.ts` 1 passed (14.1s) and `disconnected.spec.ts` 1 passed (128ms), then `Playwright passed, including the disconnected page.` The disposable crash tests passed in the same `make test` run (kill test 3.58s, terminate-backend test 1.89s when timed alone).
 
-### Phase 13
+## Phase 13 — performance — 2026-10-10
 
-Not started. `make benchmark` still exits 2. Performance numbers are not in this commit.
+`make benchmark` runs `scripts/benchmark.py` against a `consistency_bench` database on the
+same Docker Postgres 16 as `DATABASE_URL` (port 5433). It does not contact Kalshi. CI does
+not run it. Raw rows are in `docs/benchmark-results.json`. Methodology, hardware, and the
+numbers below are in `docs/benchmarks.md`.
+
+Machine: Apple M3, 16 GiB, Darwin 26.6.2, Python 3.12.11, PostgreSQL 16.15.
+Command: `DATABASE_URL=postgresql+asyncpg://consistency:consistency@127.0.0.1:5433/consistency make benchmark`.
+
+| Markets | Msg/s | Detection p95 (ms) | DB rows/s | RSS MiB |
+|---|---:|---:|---:|---:|
+| 54 | 1310.33 | 0.4797 | 1328.80 | 91.6 |
+| 270 | 1093.72 | 0.4849 | 1163.40 | 110.5 |
+| 1026 | 658.20 | 0.4873 | 789.43 | 195.5 |
+| 5022 | 313.48 | 0.4884 | 460.61 | 866.4 |
+
+The 1000 msg/s goal was hit at 54 and 270 markets and missed at 1026 and 5022. Focused
+detection p95 was 0.4849 ms (goal 100 ms). Replay of the 270-market journal matched on the
+second pass at 1817.44 entries/s. Inbound backlog stopped at the 10000 cap. A profile of a
+270-market run, taken first, put the time in `evaluate` / canonical JSON and in session
+open plus PostgreSQL waits. No pricing or detection code was changed after that profile.
+Golden fixtures were not edited and were not re-run in this phase.
 

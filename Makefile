@@ -24,7 +24,7 @@ help:
 	@echo "api        run the FastAPI app (health endpoints; readiness checks Postgres)"
 	@echo "dev        Postgres, migrations, synthetic worker, gateway, and Next.js"
 	@echo "build      production build of the Next.js dashboard"
-	@echo "benchmark  later milestone"
+	@echo "benchmark  synthetic workloads; requires DATABASE_URL on port 5433"
 
 setup:
 	$(UV) sync
@@ -82,8 +82,7 @@ replay:
 	$(PY) scripts/replay_session.py
 
 benchmark:
-	@echo "make benchmark: not yet implemented — performance milestone." >&2
-	@exit 2
+	$(PY) scripts/benchmark.py
 
 clean:
 	rm -rf .pytest_cache .mypy_cache .ruff_cache .hypothesis fixtures/datasets/generated
