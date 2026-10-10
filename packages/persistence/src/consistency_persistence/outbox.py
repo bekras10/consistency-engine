@@ -7,10 +7,18 @@ permanent hole. Readers therefore do not treat the highest visible id as a curso
 ``select_contiguous`` walks committed ids upward from the cursor:
 
 - Take the next id when it is exactly ``cursor + 1``.
-- If an id is missing and any other transaction is still in progress, stop. Hold
-  every higher committed id until that gap commits or the in-progress work ends.
-- If an id is missing and no other transaction is in progress, the hole's
-  transaction aborted. Skip it and continue.
+- If an id is missing and a transaction still holds a write lock on
+  ``notification_outbox``, stop. That transaction can still commit the missing
+  id. Hold every higher committed id until the lock clears.
+- If an id is missing and no such lock is held, the hole's transaction aborted
+  (or never inserted). Skip it. An open transaction that has not locked this
+  table cannot be given an id that was already consumed, so it must not stall
+  the tail.
+
+Outbox ids are allocated by ``INSERT`` into ``notification_outbox``. That
+statement takes ``RowExclusiveLock`` before ``nextval``'s value is visible to
+other sessions, and the lock lasts until commit or abort. A transaction that
+has not taken it cannot fill a gap behind a higher committed id.
 
 ``created_at`` is the insert time, not the commit time, and is not a cursor.
 The ``detections`` table remains the resynchronization snapshot when the tail
@@ -64,24 +72,119 @@ def _payload(value: object) -> dict[str, object]:
     raise TypeError("outbox payload must be an object")
 
 
+_WRITER_LOCKS = """
+    'RowExclusiveLock',
+    'ShareRowExclusiveLock',
+    'ExclusiveLock',
+    'AccessExclusiveLock'
+"""
+
+
+def _writer_flag(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    return isinstance(value, int) and value > 0
+
+
+async def outbox_writers_in_progress(session: AsyncSession) -> bool:
+    """True when some other backend holds a write lock on ``notification_outbox``."""
+    result = await session.execute(
+        text(
+            f"""
+            SELECT EXISTS (
+                SELECT 1
+                FROM pg_locks AS held
+                WHERE held.relation = 'notification_outbox'::regclass
+                  AND held.locktype = 'relation'
+                  AND held.granted
+                  AND held.mode IN ({_WRITER_LOCKS})
+                  AND held.pid IS DISTINCT FROM pg_backend_pid()
+            )
+            """
+        )
+    )
+    return _writer_flag(result.scalar_one())
+
+
+async def contiguous_watermark(session: AsyncSession, after_id: int) -> int:
+    """Highest committed id that can be acknowledged without skipping a live gap.
+
+    The watermark and the caller’s detection read must share one snapshot
+    (repeatable read). This does not load payloads and does not stop at a
+    fixed row count.
+    """
+    result = await session.execute(
+        text(
+            f"""
+            WITH writers AS (
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM pg_locks AS held
+                    WHERE held.relation = 'notification_outbox'::regclass
+                      AND held.locktype = 'relation'
+                      AND held.granted
+                      AND held.mode IN ({_WRITER_LOCKS})
+                      AND held.pid IS DISTINCT FROM pg_backend_pid()
+                ) AS busy
+            ),
+            ordered AS (
+                SELECT id, lag(id) OVER (ORDER BY id) AS prev
+                FROM notification_outbox
+                WHERE id > :after_id
+            ),
+            gap AS (
+                SELECT prev
+                FROM ordered
+                WHERE id > COALESCE(prev, :after_id) + 1
+                ORDER BY id
+                LIMIT 1
+            ),
+            tail AS (
+                SELECT COALESCE(MAX(id), :after_id) AS max_id
+                FROM notification_outbox
+                WHERE id > :after_id
+            )
+            SELECT CASE
+                WHEN writers.busy AND EXISTS (SELECT 1 FROM gap)
+                    THEN COALESCE((SELECT prev FROM gap), :after_id)
+                ELSE (SELECT max_id FROM tail)
+            END
+            FROM writers
+            """
+        ),
+        {"after_id": after_id},
+    )
+    raw = result.scalar_one()
+    if not isinstance(raw, int):
+        raise TypeError("outbox watermark was not an integer")
+    return raw
+
+
 async def committed_notifications(
     session: AsyncSession, after_id: int, *, limit: int = 100
 ) -> tuple[bool, list[OutboxNote]]:
-    """Return ``(writers_in_progress, contiguous committed notes)``.
+    """Return ``(outbox_writers_in_progress, contiguous committed notes)``.
 
-    The writer count and the visible rows come from one statement so they share
-    a snapshot. A gap is held while that snapshot still shows an in-progress
-    transaction (``pg_snapshot_xip``).
+    The lock check and the visible rows come from one statement so they share
+    a snapshot. A gap is held only while another transaction holds a write lock
+    on ``notification_outbox``.
     """
     if limit < 1:
         return False, []
     result = await session.execute(
         text(
-            """
-            SELECT writers.n AS writers, note.id, note.topic, note.session_id, note.payload
+            f"""
+            SELECT writers.busy AS writers, note.id, note.topic, note.session_id, note.payload
             FROM (
-                SELECT count(*)::int AS n
-                FROM pg_snapshot_xip(pg_current_snapshot())
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM pg_locks AS held
+                    WHERE held.relation = 'notification_outbox'::regclass
+                      AND held.locktype = 'relation'
+                      AND held.granted
+                      AND held.mode IN ({_WRITER_LOCKS})
+                      AND held.pid IS DISTINCT FROM pg_backend_pid()
+                ) AS busy
             ) AS writers
             LEFT JOIN LATERAL (
                 SELECT id, topic, session_id, payload
@@ -98,8 +201,7 @@ async def committed_notifications(
     rows = result.all()
     if not rows:
         return False, []
-    raw_writers = cast(object, rows[0][0])
-    writers = isinstance(raw_writers, int) and raw_writers > 0
+    writers = _writer_flag(cast(object, rows[0][0]))
     visible: list[OutboxNote] = []
     for row in rows:
         raw_id = cast(object, row[1])

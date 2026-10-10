@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { DepthChart } from "@/components/depth-chart";
 import { Money } from "@/components/money";
@@ -11,23 +11,40 @@ import type { Envelope, ReplaySnapshot } from "@/lib/types";
 
 const speeds = ["0.5", "1", "2", "5", "10"];
 
-async function send(replayId: string, action: string, body?: Record<string, string | number>) {
+async function send(
+  replayId: string,
+  action: string,
+  replayToken: string,
+  body?: Record<string, string | number>,
+) {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (replayToken) headers["x-replay-token"] = replayToken;
   const response = await fetch(`/app-data/replay/${encodeURIComponent(replayId)}/${action}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify(body ?? {}),
   });
   return (await response.json()) as Envelope<ReplaySnapshot>;
 }
 
-export function ReplayDesk({ replayId, initial }: { replayId: string; initial: ReplaySnapshot }) {
+export function ReplayDesk({
+  replayId,
+  initial,
+  replayToken,
+}: {
+  replayId: string;
+  initial: ReplaySnapshot;
+  replayToken: string;
+}) {
   const client = useQueryClient();
+  const viewerRef = useRef(replayId);
+  const [viewerId, setViewerId] = useState(replayId);
   const [seek, setSeek] = useState(initial.position_ms == null ? "" : String(initial.position_ms));
   const [note, setNote] = useState<string | null>(null);
   const query = useQuery({
-    queryKey: ["replay", replayId],
+    queryKey: ["replay", viewerId],
     queryFn: async () => {
-      const response = await fetch(`/app-data/replay/${encodeURIComponent(replayId)}`, { cache: "no-store" });
+      const response = await fetch(`/app-data/replay/${encodeURIComponent(viewerId)}`, { cache: "no-store" });
       return (await response.json()) as Envelope<ReplaySnapshot>;
     },
     initialData: { ok: true, data: initial } satisfies Envelope<ReplaySnapshot>,
@@ -36,13 +53,17 @@ export function ReplayDesk({ replayId, initial }: { replayId: string; initial: R
   const data = query.data.ok ? query.data.data : initial;
 
   async function run(action: string, body?: Record<string, string | number>) {
-    const result = await send(replayId, action, body);
+    const result = await send(viewerRef.current, action, replayToken, body);
     if (!result.ok) {
       setNote(result.detail ?? result.error);
       return;
     }
     setNote(null);
-    client.setQueryData(["replay", replayId], result);
+    if (result.data.replay_id && result.data.replay_id !== viewerRef.current) {
+      viewerRef.current = result.data.replay_id;
+      setViewerId(result.data.replay_id);
+    }
+    client.setQueryData(["replay", viewerRef.current], result);
   }
 
   const focus = data.books.find((book) => book.yes_bids.length > 0 || book.yes_asks.length > 0) ?? data.books[0];

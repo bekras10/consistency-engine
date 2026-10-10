@@ -1,15 +1,25 @@
 """In-process replay sessions for the dashboard and the public API.
 
-The gateway keeps one :class:`PlaybackService` and keys a recording by its
-ingestion session id (one dashboard viewer). ``ReplayHost.fork`` copies that
-recording into a new viewer id so two public-API clients can seek independently.
-Neither path writes the canonical journal.
+Every mutation forks a viewer when the id is a recording, so two dashboard tabs
+and two API clients each get a cursor. Neither path writes the canonical journal.
+
+Defaults (override with the constructor, or with ``REPLAY_SESSION_TTL_S`` and
+``REPLAY_MAX_VIEWERS`` when the arguments are omitted):
+
+- session TTL: 1800 seconds of idle time since the last read or command
+- maximum active viewers: 32
+
+A sweep drops idle viewers and cancels their playback tasks. A viewer touched
+inside the TTL stays, including one whose task is still playing.
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
+import time
 import uuid
+from collections.abc import Callable
 from decimal import Decimal
 from typing import Any, cast
 
@@ -371,28 +381,101 @@ def snapshot(session: PlaybackSession) -> dict[str, Any]:
     }
 
 
+class ReplayCapacityError(Exception):
+    """The process is already holding ``REPLAY_MAX_VIEWERS`` playback sessions."""
+
+
 class ReplayHost:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        ttl_s: float | None = None,
+        max_viewers: int | None = None,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
+        if ttl_s is None:
+            ttl_s = float(os.environ.get("REPLAY_SESSION_TTL_S", "1800"))
+        if max_viewers is None:
+            max_viewers = int(os.environ.get("REPLAY_MAX_VIEWERS", "32"))
+        if ttl_s <= 0 or max_viewers < 1:
+            raise ValueError("replay limits must be positive")
+        self.ttl_s = ttl_s
+        self.max_viewers = max_viewers
+        self._clock = time.monotonic if clock is None else clock
         self.service = PlaybackService()
         self._lock = asyncio.Lock()
         self._background: set[asyncio.Task[None]] = set()
+        self._seen: dict[str, float] = {}
 
     def _finished(self, task: asyncio.Task[None]) -> None:
         self._background.discard(task)
         if not task.cancelled():
             task.exception()
 
+    def touch(self, replay_id: str) -> None:
+        try:
+            self.service.get(replay_id)
+        except KeyError:
+            return
+        self._seen[replay_id] = self._clock()
+
+    def sweep(self) -> list[str]:
+        """Drop viewers idle longer than the TTL and cancel their playback tasks."""
+        now = self._clock()
+        removed: list[str] = []
+        for replay_id, seen in list(self._seen.items()):
+            if now - seen < self.ttl_s:
+                continue
+            self._drop(replay_id)
+            removed.append(replay_id)
+        return removed
+
+    def require_capacity(self) -> None:
+        self.sweep()
+        if len(self.service) >= self.max_viewers:
+            raise ReplayCapacityError("replay viewer cap")
+
+    def _drop(self, replay_id: str) -> None:
+        try:
+            playback = self.service.get(replay_id)
+        except KeyError:
+            playback = None
+        if playback is not None:
+            playback.close()
+        self.service.discard(replay_id)
+        self._seen.pop(replay_id, None)
+
+    async def preview(
+        self, sessions: async_sessionmaker[AsyncSession], replay_id: str
+    ) -> PlaybackSession:
+        """Snapshot a recording or an open viewer without creating a shared cursor."""
+        try:
+            playback = self.service.get(replay_id)
+        except KeyError:
+            playback = None
+        if playback is not None:
+            self.touch(replay_id)
+            return playback
+        async with sessions() as session:
+            return await _load_playback(session, replay_id)
+
     async def ensure(
         self, sessions: async_sessionmaker[AsyncSession], replay_id: str
     ) -> PlaybackSession:
         async with self._lock:
             try:
-                return self.service.get(replay_id)
+                playback = self.service.get(replay_id)
             except KeyError:
-                pass
+                playback = None
+            if playback is not None:
+                self.touch(replay_id)
+                return playback
             async with sessions() as session:
                 loaded = await _load_playback(session, replay_id)
-            return self.service.open(loaded)
+            self.require_capacity()
+            opened = self.service.open(loaded)
+            self.touch(opened.replay_id)
+            return opened
 
     async def fork(
         self, sessions: async_sessionmaker[AsyncSession], recording_id: str
@@ -401,8 +484,38 @@ class ReplayHost:
         async with self._lock:
             async with sessions() as session:
                 loaded = await _load_playback(session, recording_id)
+            self.require_capacity()
             viewer = loaded.isolated_copy("viewer-" + uuid.uuid4().hex)
-            return self.service.open(viewer)
+            opened = self.service.open(viewer)
+            self.touch(opened.replay_id)
+            return opened
+
+    async def mutate(
+        self,
+        sessions: async_sessionmaker[AsyncSession],
+        replay_id: str,
+        action: str,
+        body: dict[str, object] | None = None,
+    ) -> dict[str, Any]:
+        """Apply ``action`` on an isolated viewer.
+
+        A recording id forks a new viewer first. An id that is already a viewer
+        keeps that cursor. Two callers of the same recording therefore do not
+        share one session.
+        """
+        async with self._lock:
+            try:
+                playback = self.service.get(replay_id)
+            except KeyError:
+                playback = None
+            if playback is None:
+                async with sessions() as session:
+                    loaded = await _load_playback(session, replay_id)
+                self.require_capacity()
+                playback = self.service.open(loaded.isolated_copy("viewer-" + uuid.uuid4().hex))
+            self.touch(playback.replay_id)
+            self._apply(playback, action, body or {})
+            return snapshot(playback)
 
     async def command(
         self,
@@ -419,7 +532,9 @@ class ReplayHost:
         self, replay_id: str, action: str, body: dict[str, object] | None = None
     ) -> dict[str, Any]:
         """Mutate a viewer that ``fork`` already opened. Does not load a recording."""
+        self.sweep()
         playback = self.service.get(replay_id)
+        self.touch(replay_id)
         self._apply(playback, action, body or {})
         return snapshot(playback)
 

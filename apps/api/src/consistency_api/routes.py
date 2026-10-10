@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from collections.abc import AsyncIterator
 from decimal import Decimal, InvalidOperation
@@ -13,6 +14,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from consistency_api.http import authorize_replay
+from consistency_api.sse import (
+    StreamSlots,
+    heartbeat_seconds,
+    iter_queue,
+    max_connections,
+    queue_max,
+    run_producer,
+)
 from consistency_connectors.ingestion import BookManager
 from consistency_persistence.dashboard import (
     DetectionQuery,
@@ -26,8 +35,8 @@ from consistency_persistence.dashboard import (
     read_overview,
     sync_summary,
 )
-from consistency_persistence.outbox import committed_notifications
-from consistency_persistence.replay_host import ReplayHost, snapshot
+from consistency_persistence.outbox import committed_notifications, contiguous_watermark
+from consistency_persistence.replay_host import ReplayCapacityError, ReplayHost, snapshot
 from consistency_persistence.schema import DetectionRow, IngestionSessionRow
 
 router = APIRouter()
@@ -320,6 +329,7 @@ async def replay_session(request: Request, session_id: str) -> dict[str, object]
     except KeyError:
         playback = None
     if playback is not None:
+        host.touch(session_id)
         body = snapshot(playback)
         body["viewer"] = True
         return body
@@ -350,6 +360,8 @@ async def replay_start(request: Request, session_id: str) -> dict[str, object]:
         raise HTTPException(status_code=404, detail="not_found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail="journal_unavailable") from exc
+    except ReplayCapacityError as exc:
+        raise HTTPException(status_code=429, detail="replay_capacity") from exc
     body = host.command_existing(playback.replay_id, "start", {})
     body["viewer"] = True
     return body
@@ -394,11 +406,31 @@ async def stream(
 ) -> StreamingResponse:
     maker = sessions_of(request)
     cursor = _event_cursor(last_event_id)
+    slots = _sse_slots(request)
+    if not await slots.try_acquire():
+        raise HTTPException(status_code=503, detail="stream_unavailable")
+
+    async def body() -> AsyncIterator[str]:
+        try:
+            async for chunk in _tail(maker, cursor):
+                yield chunk
+        finally:
+            await slots.release()
+
     return StreamingResponse(
-        _tail(request, maker, cursor),
+        body(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+def _sse_slots(request: Request) -> StreamSlots:
+    limit = max_connections()
+    current = getattr(request.app.state, "sse_slots", None)
+    if not isinstance(current, StreamSlots) or current.limit != limit:
+        current = StreamSlots(limit)
+        request.app.state.sse_slots = current
+    return current
 
 
 def _mutate(
@@ -469,43 +501,76 @@ async def _detection_snapshot(session: AsyncSession) -> list[dict[str, object]]:
 
 
 async def _tail(
-    _request: Request,
     maker: async_sessionmaker[AsyncSession],
     last_event_id: int | None,
 ) -> AsyncIterator[str]:
-    """Tail until the ASGI server cancels this task on client disconnect."""
-    cursor = 0
-    if last_event_id is None:
-        async with maker() as session:
-            watermark, payload = await _resync(session)
-        yield _frame(watermark, "resync", payload)
-        cursor = watermark
-    else:
-        cursor = last_event_id - 1
+    """Tail until the client disconnects or the bounded queue overflows.
+
+    The queue cap is the memory bound for a slow client. Frames that do not fit
+    are left in the outbox; the client reconnects with ``Last-Event-ID``.
+    """
+    cursor = 0 if last_event_id is None else last_event_id - 1
     boundary_checked = last_event_id is None
-    while True:
+    sent_open = last_event_id is not None
+
+    async def poll() -> list[str]:
+        nonlocal cursor, boundary_checked, sent_open
+        if not sent_open:
+            sent_open = True
+            async with maker() as session:
+                watermark, payload = await _resync(session)
+            cursor = watermark
+            return [_frame(watermark, "resync", payload)]
         async with maker() as session:
             writers, notes = await committed_notifications(session, cursor, limit=100)
-            if not boundary_checked and last_event_id is not None:
-                boundary_checked = True
-                if notes and notes[0].id > last_event_id and not writers:
+        if not boundary_checked and last_event_id is not None:
+            boundary_checked = True
+            if notes and notes[0].id > last_event_id and not writers:
+                async with maker() as session:
                     watermark, payload = await _resync(session)
-                    yield _frame(watermark, "resync", payload)
-                    cursor = watermark
-                    continue
+                cursor = watermark
+                return [_frame(watermark, "resync", payload)]
+        frames: list[str] = []
         for note in notes:
-            yield _frame(
-                note.id,
-                note.topic,
-                {"topic": note.topic, "session_id": note.session_id, "payload": note.payload},
+            frames.append(
+                _frame(
+                    note.id,
+                    note.topic,
+                    {"topic": note.topic, "session_id": note.session_id, "payload": note.payload},
+                )
             )
             cursor = note.id
-        await asyncio.sleep(0.05)
+        return frames
+
+    queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=queue_max())
+    overflow = asyncio.Event()
+    producer = asyncio.create_task(
+        run_producer(
+            queue,
+            poll,
+            heartbeat_s=heartbeat_seconds(),
+            poll_s=0.05,
+            overflow=overflow,
+        )
+    )
+    try:
+        async for chunk in iter_queue(queue, overflow):
+            yield chunk
+    finally:
+        producer.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await producer
 
 
 async def _resync(session: AsyncSession) -> tuple[int, dict[str, object]]:
-    _writers, notes = await committed_notifications(session, 0, limit=10_000)
-    watermark = 0 if not notes else notes[-1].id
+    """Detection rows and the outbox watermark from one repeatable-read snapshot.
+
+    A commit that lands while this runs is invisible to both reads. It is
+    delivered on the tail after ``watermark``, so an older event is not applied
+    on top of a newer snapshot. The watermark is not capped at 10 000 rows.
+    """
+    await session.connection(execution_options={"isolation_level": "REPEATABLE READ"})
+    watermark = await contiguous_watermark(session, 0)
     return watermark, {
         "detections": await _detection_snapshot(session),
         "outbox_id": watermark,

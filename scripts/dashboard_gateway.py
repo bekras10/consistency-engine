@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from consistency_api.http import replay_token_ok
 from consistency_persistence.dashboard import (
     DetectionQuery,
     apply_journal_market,
@@ -32,7 +33,7 @@ from consistency_persistence.dashboard import (
     read_overview,
 )
 from consistency_persistence.db import make_engine, make_sessionmaker
-from consistency_persistence.replay_host import BookTail, ReplayHost, snapshot
+from consistency_persistence.replay_host import BookTail, ReplayCapacityError, ReplayHost, snapshot
 
 Json = dict[str, Any]
 Handler = Callable[[async_sessionmaker[AsyncSession]], Awaitable[Json]]
@@ -74,6 +75,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.engine = None
     app.state.books = BookTail()
     app.state.replay = ReplayHost()
+    app.state.bind_host = os.environ.get("DASHBOARD_GATEWAY_HOST", "127.0.0.1")
     if url:
         app.state.engine = make_engine(url)
         app.state.sessions = make_sessionmaker(app.state.engine)
@@ -274,10 +276,30 @@ async def market(request: Request, market_id: str) -> JSONResponse:
     return await _run(request, handler)
 
 
+def _loopback(host: str) -> bool:
+    return host in {"127.0.0.1", "::1", "localhost"}
+
+
+def _replay_mutation_is_external(request: Request) -> bool:
+    """True when this process can be reached from another host, or the peer is not local.
+
+    A gateway bound to loopback is only reachable from this machine. The Next.js
+    proxy is the browser's boundary and checks ``X-Replay-Token`` before it
+    forwards. A bind address other than loopback, or a non-loopback peer, must
+    present the token here as well.
+    """
+    bind = str(getattr(request.app.state, "bind_host", "127.0.0.1"))
+    if not _loopback(bind):
+        return True
+    client = request.client
+    peer = client.host if client is not None else ""
+    return not _loopback(peer)
+
+
 @app.get("/internal/replay/{replay_id}")
 async def replay_state(request: Request, replay_id: str) -> JSONResponse:
     async def handler(sessions: async_sessionmaker[AsyncSession]) -> Json:
-        playback = await request.app.state.replay.ensure(sessions, replay_id)
+        playback = await request.app.state.replay.preview(sessions, replay_id)
         return snapshot(playback)
 
     return await _run(request, handler)
@@ -285,22 +307,47 @@ async def replay_state(request: Request, replay_id: str) -> JSONResponse:
 
 @app.post("/internal/replay/{replay_id}/{action}")
 async def replay_command(request: Request, replay_id: str, action: str) -> JSONResponse:
+    if _replay_mutation_is_external(request) and not replay_token_ok(
+        request.headers.get("x-replay-token", "")
+    ):
+        return JSONResponse(status_code=401, content={"error": "unauthorized"})
     payload = await request.body()
     parsed = json.loads(payload) if payload else {}
     raw = parsed if isinstance(parsed, dict) else {}
 
-    async def handler(sessions: async_sessionmaker[AsyncSession]) -> Json:
-        body = await request.app.state.replay.command(sessions, replay_id, action, raw)
-        if not isinstance(body, dict):
-            raise TypeError("replay snapshot was not an object")
-        return body
-
-    return await _run(request, handler)
+    sessions = _sessions(request)
+    if sessions is None:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "ok": False,
+                "error": "database_unavailable",
+                "detail": "DATABASE_URL is not set",
+            },
+        )
+    try:
+        body = await request.app.state.replay.mutate(sessions, replay_id, action, raw)
+    except ReplayCapacityError:
+        return JSONResponse(status_code=429, content={"ok": False, "error": "replay_capacity"})
+    except KeyError:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "not_found"})
+    except ValueError as exc:
+        return JSONResponse(
+            status_code=400, content={"ok": False, "error": "invalid_input", "detail": str(exc)}
+        )
+    except Exception as exc:
+        return JSONResponse(
+            status_code=503,
+            content={"ok": False, "error": "database_unavailable", "detail": type(exc).__name__},
+        )
+    return JSONResponse(content={"ok": True, "data": body})
 
 
 def main() -> None:
+    host = os.environ.get("DASHBOARD_GATEWAY_HOST", "127.0.0.1")
     port = int(os.environ.get("DASHBOARD_GATEWAY_PORT", "8765"))
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
+    app.state.bind_host = host
+    uvicorn.run(app, host=host, port=port, log_level="info")
 
 
 if __name__ == "__main__":

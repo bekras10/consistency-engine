@@ -234,6 +234,11 @@ class PlaybackSession:
         await self._sleep(seconds)
         return self._paused
 
+    def close(self) -> None:
+        """Stop playback and cancel an in-flight task. The recording is unchanged."""
+        self._paused = True
+        self._stop_task()
+
     def _stop_task(self) -> None:
         task = self._task
         self._task = None
@@ -252,6 +257,12 @@ class PlaybackService:
             raise ValueError(f"replay session {session.replay_id} already exists")
         self._sessions[session.replay_id] = session
         return session
+
+    def discard(self, replay_id: str) -> None:
+        self._sessions.pop(replay_id, None)
+
+    def __len__(self) -> int:
+        return len(self._sessions)
 
     def get(self, replay_id: str) -> PlaybackSession:
         try:

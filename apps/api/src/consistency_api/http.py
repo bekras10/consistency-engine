@@ -21,6 +21,21 @@ def error_body(code: str) -> dict[str, str]:
     return {"error": code}
 
 
+def replay_mutations_public() -> bool:
+    flag = os.environ.get("REPLAY_MUTATIONS_PUBLIC", "false").strip().lower()
+    return flag in {"1", "true", "yes"}
+
+
+def replay_token_ok(presented: str) -> bool:
+    """True when replay mutations are public or ``presented`` matches ``REPLAY_API_TOKEN``."""
+    if replay_mutations_public():
+        return True
+    expected = os.environ.get("REPLAY_API_TOKEN", "").strip()
+    if not expected or not presented:
+        return False
+    return secrets.compare_digest(presented, expected)
+
+
 def authorize_replay(request: Request) -> None:
     """POST replay controls require ``X-Replay-Token``.
 
@@ -28,12 +43,7 @@ def authorize_replay(request: Request) -> None:
     ``REPLAY_MUTATIONS_PUBLIC`` is explicitly ``true``. GET reads are not checked
     here; they are open on a local deployment. See ``docs/api-reference.md``.
     """
-    flag = os.environ.get("REPLAY_MUTATIONS_PUBLIC", "false").strip().lower()
-    if flag in {"1", "true", "yes"}:
-        return
-    expected = os.environ.get("REPLAY_API_TOKEN", "").strip()
-    presented = request.headers.get("x-replay-token", "")
-    if not expected or not presented or not secrets.compare_digest(presented, expected):
+    if not replay_token_ok(request.headers.get("x-replay-token", "")):
         raise HTTPException(status_code=401, detail="unauthorized")
 
 
