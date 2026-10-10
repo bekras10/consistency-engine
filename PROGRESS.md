@@ -576,7 +576,11 @@ Also added, without changing existing expectations: `test_phase12_concurrency.py
 
 Verification on this machine (Docker `postgres:16.15`, host port 5433): `make lint` clean, `make typecheck` clean (87 source files). `make test` 413 passed, 0 failed, 0 skipped. Suites: unit 315, golden 34, property 24, replay 13, integration 27. Frontend: eslint clean, `tsc --noEmit` clean, Vitest 8 passed, `next build` succeeded. `scripts/e2e.sh` printed the proxy line `Replay proxy: 401 without a token; viewers ... seek to cursors 0 and 12277`, then Playwright `dashboard.spec.ts` 1 passed (14.5s) and `disconnected.spec.ts` 1 passed (122ms), then `Playwright passed, including the disconnected page.`
 
-GitHub Actions for the final push: recorded after that run finishes.
+GitHub Actions run [38086643349](https://github.com/bekras10/consistency-engine/actions/runs/38086643349)
+finished success on `4e1a937` (backend, frontend, and Playwright). An earlier push,
+[38086251147](https://github.com/bekras10/consistency-engine/actions/runs/38086251147),
+failed because the dashboard seek assertion timed out while a full-journal seek was still
+running; the spec now waits for that response. The position assertion is unchanged.
 
 ### Remaining limitations
 
@@ -592,5 +596,6 @@ GitHub Actions for the final push: recorded after that run finishes.
 
 ### Phase 13
 
-Ready for performance work only after this push's GitHub Actions run is green. The five fixes are in and the local suites above finished green.
+Yes. The five fixes are in, the local suites above finished green, and GitHub Actions run
+38086643349 finished success, including Playwright. Performance work has not been started.
 
