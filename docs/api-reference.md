@@ -79,9 +79,16 @@ above.
 
 `401` body: `{"error":"unauthorized"}`.
 
-The Next.js route `POST /app-data/replay/...` checks the same header before it proxies.
-A request that omits the token does not reach playback. The replay page sends the token
-from `REPLAY_API_TOKEN` so the local dashboard can operate. `GET` stays open.
+The public API still requires `X-Replay-Token`. The dashboard does not. `POST /app-data/replay/...`
+checks an httpOnly cookie, `ce_replay_capability`, issued by `POST /app-data/replay-capability`.
+The cookie value is a random capability, not `REPLAY_API_TOKEN`. It lasts
+`REPLAY_CAPABILITY_TTL_S` seconds (default 900). The first successful start binds it to the
+forked viewer id. Later posts from that cookie may command only that viewer; a post aimed
+at another viewer is `403` `{"error":"replay_forbidden"}`. A missing or expired capability
+is `401` `{"error":"unauthorized"}`, including a request that presents `X-Replay-Token` and
+no cookie. The Next server attaches `X-Replay-Token` only on the hop to the gateway. The
+page HTML, the RSC payload, and `/app-data` responses do not contain the shared token.
+`GET` stays open.
 
 If `DASHBOARD_GATEWAY_HOST` is not loopback (`127.0.0.1`, `::1`, or `localhost`), the
 gateway requires the token on its own replay posts. The default bind is `127.0.0.1`.
@@ -101,7 +108,10 @@ On reconnect, send `Last-Event-ID` with the last applied id. The stream emits th
 event again, then anything newer. Applying by id is idempotent, so the boundary is not a
 second logical update. If that id is gone and a later id is already committed (the boundary
 transaction aborted, or the row is no longer in the log), the stream sends `resync` and
-tails from the new high-water mark instead of skipping ahead inside a hole.
+tails from the new high-water mark instead of skipping ahead inside a hole. If
+`Last-Event-ID` is greater than every reserved or committed outbox id, the database was
+recreated or restored underneath the client. The stream sends `resync` on connect instead
+of waiting for an id that will not appear.
 
 `event:` for a tail row is the outbox topic (`detection`). `data` is
 `{"topic", "session_id", "payload"}`. `payload` is the same document the in-process broker
@@ -124,12 +134,13 @@ order. Two overlapping transactions can take ids 10 and 11, and 11 can commit fi
 that advances to 11 would lose 10 when it commits. A rollback of 10 leaves a permanent hole,
 so blocking until every integer appears would stall.
 
-`committed_notifications` shares one snapshot between the visible rows and a check for
-write locks on `notification_outbox` (`RowExclusiveLock` and stronger). It delivers only
-the contiguous committed prefix. A missing id is held only while another transaction holds
-one of those locks, because that transaction can still commit the id. An unrelated open
-transaction does not. When the lock is gone, a missing id is an aborted hole and is skipped.
-`created_at` is not used to order or delay delivery.
+`committed_notifications` reads the outbox rows in its snapshot, then `pg_xact_status` of
+the xid stored in `outbox_claims` for each missing id. It does not query `pg_locks`. A
+visible id is delivered. `aborted` is skipped. `in progress` holds every higher id.
+`committed` while the row is missing from this snapshot also holds: the writer committed
+after the snapshot, and the next read delivers the row. It is not treated as an aborted
+hole. An unrelated transaction does not insert a claim, so it does not stall a contiguous
+prefix. `created_at` is not used to order or delay delivery.
 
 `resync` reads the detection rows and `contiguous_watermark` in one repeatable-read
 transaction. The watermark is the contiguous high-water mark, not a 10 000-row prefix.
@@ -146,6 +157,10 @@ A commit that arrives during the read is not mixed into that snapshot.
 - Each stream queues at most `SSE_QUEUE_MAX` frames (default 32). A slower client is
   disconnected instead of growing that queue. Reconnect with `Last-Event-ID`.
 - Replay viewers: `REPLAY_MAX_VIEWERS` (default 32) and `REPLAY_SESSION_TTL_S` (default 1800).
+- Recording previews: `REPLAY_MAX_PREVIEWS` (default 4). A preview past the cap is `429`
+  `{"error":"replay_preview_busy","detail":"Too many replay previews are in flight."}`.
+  The reconstructed book is not kept after the response. Open viewers do not use this cap.
+- Dashboard replay capabilities: `REPLAY_CAPABILITY_TTL_S` (default 900).
 - CORS origins come from `CORS_ORIGINS` (default `http://127.0.0.1:3000` and
   `http://localhost:3000`). Methods `GET`, `POST`, `OPTIONS`. Headers include
   `X-Replay-Token` and `Last-Event-ID`. Credentials are not allowed.

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 
 from consistency_persistence.db import make_engine, make_sessionmaker
-from consistency_persistence.outbox import committed_notifications
+from consistency_persistence.outbox import committed_notifications, stage_notification
 from consistency_persistence.recording import _apply_event
 from consistency_persistence.schema import NotificationOutboxRow
 from consistency_persistence.store import PersistenceStore
@@ -16,14 +16,6 @@ from tests.integration.test_postgres_pipeline import _messages
 from tests.unit.test_detection_pipeline import Harness
 
 pytestmark = pytest.mark.integration
-
-_INSERT = text(
-    """
-    INSERT INTO notification_outbox (topic, session_id, payload, created_at)
-    VALUES ('detection', NULL, CAST(:payload AS jsonb), CURRENT_TIMESTAMP)
-    RETURNING id
-    """
-)
 
 
 async def test_outbox_row_is_in_the_detection_transaction(db: str) -> None:
@@ -98,9 +90,9 @@ async def test_higher_outbox_id_waits_for_the_lower_commit(db: str) -> None:
     higher = await engine.connect()
     try:
         await lower.begin()
-        low_id = int((await lower.execute(_INSERT, {"payload": '{"side":"low"}'})).scalar_one())
+        low_id = await stage_notification(lower, engine, '{"side":"low"}')
         await higher.begin()
-        high_id = int((await higher.execute(_INSERT, {"payload": '{"side":"high"}'})).scalar_one())
+        high_id = await stage_notification(higher, engine, '{"side":"high"}')
         await higher.commit()
         assert low_id < high_id
         async with maker() as session:
@@ -124,10 +116,10 @@ async def test_aborted_outbox_hole_is_not_a_permanent_stall(db: str) -> None:
     committed = await engine.connect()
     try:
         await abandoned.begin()
-        await abandoned.execute(_INSERT, {"payload": '{"side":"gone"}'})
+        await stage_notification(abandoned, engine, '{"side":"gone"}')
         await abandoned.rollback()
         await committed.begin()
-        kept = int((await committed.execute(_INSERT, {"payload": '{"side":"kept"}'})).scalar_one())
+        kept = await stage_notification(committed, engine, '{"side":"kept"}')
         await committed.commit()
         async with maker() as session:
             writers, notes = await committed_notifications(session, 0)

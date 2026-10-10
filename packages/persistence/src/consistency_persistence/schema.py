@@ -50,6 +50,7 @@ SPEC_TABLES: tuple[str, ...] = (
     "system_health",
     "configuration_versions",
     "notification_outbox",
+    "outbox_claims",
 )
 CHECKPOINT_TABLE = "session_checkpoints"
 

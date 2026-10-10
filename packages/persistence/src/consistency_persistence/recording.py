@@ -19,6 +19,7 @@ from consistency_core.events import OrderBookSnapshotEvent
 from consistency_core.pricing.certificate import ProofCertificate
 from consistency_core.serialization import canonical_json
 from consistency_persistence.dashboard import json_ready
+from consistency_persistence.outbox import reserve_outbox_id
 from consistency_persistence.schema import (
     DetectionLegRow,
     DetectionRow,
@@ -236,6 +237,7 @@ async def _apply_event(session: AsyncSession, ev: DetectionEvent) -> None:
         raise TypeError("outbox payload must be an object")
     session.add(
         NotificationOutboxRow(
+            id=await reserve_outbox_id(session),
             topic=DETECTION_TOPIC,
             session_id=rec.session_id,
             payload=payload,

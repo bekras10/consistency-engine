@@ -2,21 +2,38 @@
 
 from __future__ import annotations
 
-from consistency_persistence.outbox import select_contiguous
+from consistency_persistence.outbox import publication_prefix
 
 
 def test_contiguous_prefix_while_a_gap_might_still_commit() -> None:
-    assert select_contiguous([1, 2, 4], 0, writers_in_progress=True) == [1, 2]
+    blocked, chosen = publication_prefix([1, 2, 4], 0, {3: "in progress"})
+    assert blocked is True
+    assert chosen == [1, 2]
 
 
 def test_higher_committed_id_is_held_when_the_lower_id_is_missing() -> None:
-    assert select_contiguous([2], 0, writers_in_progress=True) == []
+    blocked, chosen = publication_prefix([2], 0, {1: "in progress"})
+    assert blocked is True
+    assert chosen == []
 
 
 def test_aborted_hole_is_skipped_when_no_transaction_is_open() -> None:
-    assert select_contiguous([2, 3], 0, writers_in_progress=False) == [2, 3]
+    blocked, chosen = publication_prefix([2, 3], 0, {1: "aborted"})
+    assert blocked is False
+    assert chosen == [2, 3]
 
 
 def test_cursor_does_not_move_past_a_held_gap() -> None:
-    assert select_contiguous([11], 9, writers_in_progress=True) == []
-    assert select_contiguous([10, 11], 9, writers_in_progress=True) == [10, 11]
+    blocked, waiting = publication_prefix([11], 9, {10: "in progress"})
+    assert blocked is True
+    assert waiting == []
+    blocked, delivered = publication_prefix([10, 11], 9, {})
+    assert blocked is False
+    assert delivered == [10, 11]
+
+
+def test_committed_id_missing_from_the_snapshot_is_not_skipped() -> None:
+    """Status says committed, but this snapshot has no row. Do not skip it."""
+    blocked, chosen = publication_prefix([2], 0, {1: "committed"})
+    assert blocked is True
+    assert chosen == []

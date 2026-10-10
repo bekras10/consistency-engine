@@ -3,14 +3,23 @@
 Every mutation forks a viewer when the id is a recording, so two dashboard tabs
 and two API clients each get a cursor. Neither path writes the canonical journal.
 
-Defaults (override with the constructor, or with ``REPLAY_SESSION_TTL_S`` and
-``REPLAY_MAX_VIEWERS`` when the arguments are omitted):
+Defaults (override with the constructor, or with the environment variables
+when the arguments are omitted):
 
-- session TTL: 1800 seconds of idle time since the last read or command
-- maximum active viewers: 32
+- session TTL: ``REPLAY_SESSION_TTL_S``, 1800 seconds of idle time since the last read or command
+- maximum active viewers: ``REPLAY_MAX_VIEWERS``, 32
+- maximum in-flight recording previews: ``REPLAY_MAX_PREVIEWS``, 4
 
 A sweep drops idle viewers and cancels their playback tasks. A viewer touched
 inside the TTL stays, including one whose task is still playing.
+
+``preview`` of a recording that is not already an open viewer reconstructs the
+journal. That work does not take a viewer slot. More than
+``REPLAY_MAX_PREVIEWS`` reconstructions at once raise ``ReplayPreviewBusyError``
+immediately. The reconstructed book is not stored on the host and is dropped
+before ``preview`` returns, so it does not outlive the request. An open
+viewer's snapshot does not take a preview slot, and a viewer command does not
+wait behind a preview.
 """
 
 from __future__ import annotations
@@ -385,27 +394,36 @@ class ReplayCapacityError(Exception):
     """The process is already holding ``REPLAY_MAX_VIEWERS`` playback sessions."""
 
 
+class ReplayPreviewBusyError(Exception):
+    """``REPLAY_MAX_PREVIEWS`` reconstructions are already in flight."""
+
+
 class ReplayHost:
     def __init__(
         self,
         *,
         ttl_s: float | None = None,
         max_viewers: int | None = None,
+        max_previews: int | None = None,
         clock: Callable[[], float] | None = None,
     ) -> None:
         if ttl_s is None:
             ttl_s = float(os.environ.get("REPLAY_SESSION_TTL_S", "1800"))
         if max_viewers is None:
             max_viewers = int(os.environ.get("REPLAY_MAX_VIEWERS", "32"))
-        if ttl_s <= 0 or max_viewers < 1:
+        if max_previews is None:
+            max_previews = int(os.environ.get("REPLAY_MAX_PREVIEWS", "4"))
+        if ttl_s <= 0 or max_viewers < 1 or max_previews < 1:
             raise ValueError("replay limits must be positive")
         self.ttl_s = ttl_s
         self.max_viewers = max_viewers
+        self.max_previews = max_previews
         self._clock = time.monotonic if clock is None else clock
         self.service = PlaybackService()
         self._lock = asyncio.Lock()
         self._background: set[asyncio.Task[None]] = set()
         self._seen: dict[str, float] = {}
+        self._previews_in_flight = 0
 
     def _finished(self, task: asyncio.Task[None]) -> None:
         self._background.discard(task)
@@ -445,19 +463,44 @@ class ReplayHost:
         self.service.discard(replay_id)
         self._seen.pop(replay_id, None)
 
+    def _acquire_preview(self) -> bool:
+        if self._previews_in_flight >= self.max_previews:
+            return False
+        self._previews_in_flight += 1
+        return True
+
+    def _release_preview(self) -> None:
+        self._previews_in_flight -= 1
+
     async def preview(
         self, sessions: async_sessionmaker[AsyncSession], replay_id: str
-    ) -> PlaybackSession:
-        """Snapshot a recording or an open viewer without creating a shared cursor."""
+    ) -> dict[str, Any]:
+        """Snapshot a recording or an open viewer without creating a shared cursor.
+
+        An open viewer is returned from memory and does not use a preview slot.
+        A recording is reconstructed under ``REPLAY_MAX_PREVIEWS``. Past that
+        cap this raises ``ReplayPreviewBusyError`` without waiting. The reconstructed
+        book is dropped before the snapshot dict is returned.
+        """
         try:
             playback = self.service.get(replay_id)
         except KeyError:
             playback = None
         if playback is not None:
             self.touch(replay_id)
-            return playback
-        async with sessions() as session:
-            return await _load_playback(session, replay_id)
+            return snapshot(playback)
+        if not self._acquire_preview():
+            raise ReplayPreviewBusyError("replay preview cap")
+        try:
+            async with sessions() as session:
+                loaded = await _load_playback(session, replay_id)
+            body = snapshot(loaded)
+            loaded.close()
+            loaded.entries.clear()
+            loaded._applier, loaded._outcome = loaded._blank()
+            return body
+        finally:
+            self._release_preview()
 
     async def ensure(
         self, sessions: async_sessionmaker[AsyncSession], replay_id: str

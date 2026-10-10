@@ -35,7 +35,11 @@ from consistency_persistence.dashboard import (
     read_overview,
     sync_summary,
 )
-from consistency_persistence.outbox import committed_notifications, contiguous_watermark
+from consistency_persistence.outbox import (
+    committed_notifications,
+    contiguous_watermark,
+    highest_outbox_id,
+)
 from consistency_persistence.replay_host import ReplayCapacityError, ReplayHost, snapshot
 from consistency_persistence.schema import DetectionRow, IngestionSessionRow
 
@@ -521,15 +525,27 @@ async def _tail(
                 watermark, payload = await _resync(session)
             cursor = watermark
             return [_frame(watermark, "resync", payload)]
-        async with maker() as session:
-            writers, notes = await committed_notifications(session, cursor, limit=100)
         if not boundary_checked and last_event_id is not None:
             boundary_checked = True
+            async with maker() as session:
+                high = await highest_outbox_id(session)
+            # A cursor past every reserved id belongs to a database that was
+            # recreated or restored. Waiting for that id would never end.
+            if last_event_id > high:
+                async with maker() as session:
+                    watermark, payload = await _resync(session)
+                cursor = watermark
+                return [_frame(watermark, "resync", payload)]
+            async with maker() as session:
+                writers, notes = await committed_notifications(session, cursor, limit=100)
             if notes and notes[0].id > last_event_id and not writers:
                 async with maker() as session:
                     watermark, payload = await _resync(session)
                 cursor = watermark
                 return [_frame(watermark, "resync", payload)]
+        else:
+            async with maker() as session:
+                writers, notes = await committed_notifications(session, cursor, limit=100)
         frames: list[str] = []
         for note in notes:
             frames.append(

@@ -582,20 +582,33 @@ finished success on `4e1a937` (backend, frontend, and Playwright). An earlier pu
 failed because the dashboard seek assertion timed out while a full-journal seek was still
 running; the spec now waits for that response. The position assertion is unchanged.
 
-### Remaining limitations
+### Remaining limitations (superseded in part by the remediation below)
 
 - `make benchmark` still exits 2. No deployment images. Phase 13 has not been started.
 - The dashboard still polls `/app-data`. `GET /api/v1/stream` is the SSE tail; pages are not switched onto it.
-- Public GET routes stay open on a local deployment. The replay token is a shared local secret embedded in the replay page for the operator's browser, not a per-user login.
+- Public GET routes stay open on a local deployment.
 - Viewer cursors live in the process that opened them and disappear on process restart.
-- A gateway bound to loopback trusts the Next server after the proxy has checked the token. A bind that is not loopback checks the token itself.
-- The outbox hold depends on `INSERT` into `notification_outbox` taking `RowExclusiveLock` before the new id is visible. That is the only id allocation path in this code.
+- A gateway bound to loopback trusts the Next server after the proxy has checked the capability. A bind that is not loopback checks `X-Replay-Token` itself.
 - A slow SSE client is disconnected when its queue fills. Events stay in the outbox for `Last-Event-ID`.
 - Market depth on a detection page is the latest journal book. Replay is the cursor-accurate book.
 - `BREAKPOINT_APPROXIMATE` remains the fallback when an exact breakpoint is not found. Fee schedules for real venues stay unverified. No Kalshi network calls.
 
+## Remediation before Phase 13 — 2026-10-10
+
+Golden expectations in `fixtures/golden` and `tests/golden` were not edited. Alembic revision
+`0003_outbox_claims` adds `outbox_claims`.
+
+| Issue | Regression | Pre-fix failure | Design |
+|---|---|---|---|
+| Browser-exposed replay token | `lib/replay-proxy.test.ts` (`does not accept the shared token from the browser`, `keeps the shared token out of capability and proxy responses`, `lets two capabilities seek independently and refuses the other viewer`); `scripts/check_replay_proxy.py` in `scripts/e2e.sh`. Existing 401 cases stay | The replay page passed `expectedReplayToken()` into client `ReplayDesk`, so `REPLAY_API_TOKEN` was in the HTML | `POST /app-data/replay-capability` sets httpOnly `ce_replay_capability` (`REPLAY_CAPABILITY_TTL_S`, default 900). The body is `{ok:true}`. The first start binds the cookie to that viewer. The Next route checks the cookie and attaches `X-Replay-Token` only on the gateway hop. A browser-supplied token is ignored. Another viewer's id is `403` `replay_forbidden` |
+| Outbox commit/snapshot race | `test_commit_between_snapshot_and_lock_check_is_not_skipped`; `test_committed_claim_is_not_skipped_when_the_row_misses_the_snapshot`; `test_committed_id_missing_from_the_snapshot_is_not_skipped`. Kept `test_higher_outbox_id_waits_for_the_lower_commit`, `test_aborted_outbox_hole_is_not_a_permanent_stall`, `test_unrelated_transaction_does_not_stall_committed_notifications` | `test_commit_between_snapshot_and_lock_check_is_not_skipped` delivered only id 2 (`assert [2] != [2]`) after id 1 committed between the snapshot and the `pg_locks` check | Claims, not locks. A short advisory-lock transaction commits `(id, xid)` into `outbox_claims` after `nextval`. The detection transaction inserts the outbox row with that id. The reader uses `pg_xact_status` of the stored xid. `committed` while the row is missing from the snapshot holds the cursor. `aborted` is skipped. No `pg_locks` query |
+| SSE cursor past the log | `test_last_event_id_past_the_log_sends_a_full_resync` | A `Last-Event-ID` above every outbox id waited for an event the restored database would not produce | If `Last-Event-ID` is greater than `highest_outbox_id` (max of outbox ids and claim ids), the stream sends `resync` on connect |
+| Database interruption | `test_terminate_backend_during_open_write_leaves_no_orphans`; `test_worker_recovers_after_postgres_container_kill` | The Phase 12 restart test stopped the worker before `docker restart` of the shared database | A disposable container `consistency-engine-crash-db` on host port 55432. `docker kill` while the worker is writing, then a new container on the same volume, migrate, resume. The CI-safe variant calls `pg_terminate_backend` on the writer connection during an open detection transaction. Neither test touches port 5432 or `consistency-engine-db-1` |
+| Replay preview cost | `test_preview_cap_fails_fast_and_a_viewer_is_not_blocked` | `ReplayHost.preview` reconstructed a recording with no concurrency cap and could hold the book after the response | `REPLAY_MAX_PREVIEWS` default 4. Past the cap raises `ReplayPreviewBusyError` immediately (`429` `replay_preview_busy`). The reconstructed book is dropped before the snapshot is returned. An open viewer does not take a preview slot and is not queued behind a preview |
+
+Verification on this machine (Docker `postgres:16.15`, host port 5433): `make lint` clean, `make typecheck` clean (87 source files). `make test` 420 passed, 0 failed, 0 skipped, in 86.01s. Suites: unit 316, golden 34, property 24, replay 14, integration 32. Frontend: eslint clean, `tsc --noEmit` clean, Vitest 10 passed, `next build` succeeded. `scripts/e2e.sh` (with `E2E_SKIP_COMPOSE=1` and `DATABASE_URL` on port 5433) printed `Replay proxy: 401 without a token; viewers viewer-c02f4646f15d466f99e78aa3153f9d43 and viewer-b9f62d56f32741a2860ec6c4b6bd1563 seek to cursors 0 and 12277.`, then Playwright `dashboard.spec.ts` 1 passed (14.1s) and `disconnected.spec.ts` 1 passed (128ms), then `Playwright passed, including the disconnected page.` The disposable crash tests passed in the same `make test` run (kill test 3.58s, terminate-backend test 1.89s when timed alone).
+
 ### Phase 13
 
-Yes. The five fixes are in, the local suites above finished green, and GitHub Actions run
-38086643349 finished success, including Playwright. Performance work has not been started.
+Not started. `make benchmark` still exits 2. Performance numbers are not in this commit.
 

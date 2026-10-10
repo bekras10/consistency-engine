@@ -11,31 +11,35 @@ import type { Envelope, ReplaySnapshot } from "@/lib/types";
 
 const speeds = ["0.5", "1", "2", "5", "10"];
 
-async function send(
-  replayId: string,
-  action: string,
-  replayToken: string,
-  body?: Record<string, string | number>,
-) {
-  const headers: Record<string, string> = { "content-type": "application/json" };
-  if (replayToken) headers["x-replay-token"] = replayToken;
+let capabilityReady: Promise<void> | null = null;
+
+function ensureCapability(): Promise<void> {
+  if (capabilityReady) return capabilityReady;
+  const pending = fetch("/app-data/replay-capability", {
+    method: "POST",
+    credentials: "same-origin",
+  }).then((response) => {
+    if (!response.ok) {
+      capabilityReady = null;
+      throw new Error("replay capability was not issued");
+    }
+  });
+  capabilityReady = pending;
+  return pending;
+}
+
+async function send(replayId: string, action: string, body?: Record<string, string | number>) {
+  await ensureCapability();
   const response = await fetch(`/app-data/replay/${encodeURIComponent(replayId)}/${action}`, {
     method: "POST",
-    headers,
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
     body: JSON.stringify(body ?? {}),
   });
   return (await response.json()) as Envelope<ReplaySnapshot>;
 }
 
-export function ReplayDesk({
-  replayId,
-  initial,
-  replayToken,
-}: {
-  replayId: string;
-  initial: ReplaySnapshot;
-  replayToken: string;
-}) {
+export function ReplayDesk({ replayId, initial }: { replayId: string; initial: ReplaySnapshot }) {
   const client = useQueryClient();
   const viewerRef = useRef(replayId);
   const [viewerId, setViewerId] = useState(replayId);
@@ -53,7 +57,7 @@ export function ReplayDesk({
   const data = query.data.ok ? query.data.data : initial;
 
   async function run(action: string, body?: Record<string, string | number>) {
-    const result = await send(viewerRef.current, action, replayToken, body);
+    const result = await send(viewerRef.current, action, body);
     if (!result.ok) {
       setNote(result.detail ?? result.error);
       return;

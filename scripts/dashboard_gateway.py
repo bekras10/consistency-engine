@@ -33,7 +33,12 @@ from consistency_persistence.dashboard import (
     read_overview,
 )
 from consistency_persistence.db import make_engine, make_sessionmaker
-from consistency_persistence.replay_host import BookTail, ReplayCapacityError, ReplayHost, snapshot
+from consistency_persistence.replay_host import (
+    BookTail,
+    ReplayCapacityError,
+    ReplayHost,
+    ReplayPreviewBusyError,
+)
 
 Json = dict[str, Any]
 Handler = Callable[[async_sessionmaker[AsyncSession]], Awaitable[Json]]
@@ -124,6 +129,15 @@ async def _run(request: Request, handler: Handler) -> JSONResponse:
         body = await handler(sessions)
     except KeyError:
         return JSONResponse(status_code=404, content={"ok": False, "error": "not_found"})
+    except ReplayPreviewBusyError:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "ok": False,
+                "error": "replay_preview_busy",
+                "detail": "Too many replay previews are in flight.",
+            },
+        )
     except ValueError as exc:
         return JSONResponse(
             status_code=400, content={"ok": False, "error": "invalid_input", "detail": str(exc)}
@@ -299,8 +313,7 @@ def _replay_mutation_is_external(request: Request) -> bool:
 @app.get("/internal/replay/{replay_id}")
 async def replay_state(request: Request, replay_id: str) -> JSONResponse:
     async def handler(sessions: async_sessionmaker[AsyncSession]) -> Json:
-        playback = await request.app.state.replay.preview(sessions, replay_id)
-        return snapshot(playback)
+        return await request.app.state.replay.preview(sessions, replay_id)
 
     return await _run(request, handler)
 

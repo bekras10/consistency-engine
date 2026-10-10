@@ -125,42 +125,38 @@ polls `/app-data` until a page is switched to this stream.
 
 ### Concurrent commit order
 
-`id` is `bigserial`. `nextval` runs at INSERT, before COMMIT, and a rolled-back insert does
-not return the value. Assignment order is not commit order.
+`id` comes from `notification_outbox_id_seq` before the detection transaction commits.
+`nextval` does not roll back. Assignment order is not commit order, and a rollback leaves
+a hole. Readers do not query `pg_locks`. That view is live, so a commit between the
+snapshot and the lock check can look like an aborted hole and the reader would skip an id
+that actually committed.
 
-Two detection transactions can overlap:
+`outbox_claims` (revision `0003_outbox_claims`) is the publication record. Before the
+outbox row is inserted, the detection transaction reads `pg_current_xact_id()`. A second
+connection holds `pg_advisory_xact_lock` only long enough to take `nextval` and commit
+`(id, xid)` into `outbox_claims`. The next id is not reserved until that commit. The
+detection transaction then inserts the outbox row with the reserved id and commits later,
+or rolls back. The claim remains either way.
 
-1. Transaction A inserts an outbox row and is given id 10. It has not committed.
-2. Transaction B inserts an outbox row, is given id 11, and commits.
-3. A poller running `WHERE id > :cursor ORDER BY id` sees 11, advances the cursor to 11, and
-   emits that event.
-4. Transaction A commits id 10. The poller has already moved past it.
+`committed_notifications` loads the outbox rows visible to its snapshot, then calls
+`pg_xact_status` on the stored xid of each missing id. It does not read the outbox again
+after that status check.
 
-Waiting for the missing integer is not enough either. A rollback leaves a permanent hole, so
-a consumer that blocks until every id arrives will stall. A `created_at` delay does not fix
-it: that column is insert time, not commit time.
-
-The reader does not treat the highest visible id as a safe cursor. `committed_notifications`
-loads the visible rows and the outbox write-lock check in one statement, then
-`select_contiguous` walks ids upward from the cursor:
-
-- The next id is delivered when it is exactly `cursor + 1`.
-- If an id is missing and another backend holds a write lock on `notification_outbox`,
-  the reader stops. That transaction can still commit the missing id. A higher committed
-  id is held until the lock clears. It is not delivered in a way that moves the cursor
-  past the missing one.
-- If an id is missing and no such lock is held, the hole's transaction aborted. The hole
-  is skipped. An open transaction that has not locked this table cannot be assigned an id
-  that `nextval` already consumed, so unrelated work does not stall the tail.
-
-Outbox ids are allocated only by `INSERT` into `notification_outbox`. That statement takes
-`RowExclusiveLock` before the new id is visible to other sessions, and the lock lasts until
-commit or abort.
+- A visible id is delivered.
+- `aborted` is skipped. A missing id with no claim, when a later claim exists, is skipped
+  too: `nextval` ran and the claim transaction rolled back, so the row was never inserted.
+- `in progress` stops the cursor. A higher committed id waits.
+- `committed`, while the row is absent from this snapshot, stops the cursor. The id
+  committed after the snapshot. It is not an aborted hole. The next read sees the row.
+- `unknown` stops the cursor. An unrelated transaction does not insert a claim, so it does
+  not stall a contiguous committed prefix.
 
 `created_at` stays the insert time and is not a cursor. The `detections` row stays the
 resynchronization snapshot when the tail is uncertain. SSE `id:` is the outbox id.
 Reconnecting with `Last-Event-ID` replays that boundary event so a client can apply it
-idempotently; events after it are not skipped. See `docs/api-reference.md`.
+idempotently. If `Last-Event-ID` is greater than every reserved or committed outbox id,
+the stream sends `resync` immediately instead of waiting for an id the restored database
+will not produce. See `docs/api-reference.md`.
 
 ## Dashboard
 
@@ -172,13 +168,26 @@ internal adapter in front of the same `dashboard.py` reads and `ReplayHost` the 
 `/api/v1` routes use, so the two surfaces do not keep separate calculations. `POST /internal/replay/{id}/start` and `POST /api/v1/replay/sessions/{id}/start` both fork a
 viewer id. Two dashboard tabs and two API clients can seek the same recording without
 sharing a cursor and without writing the canonical journal. A gateway bound to loopback
-trusts the Next.js process; the browser-facing `/app-data` proxy requires `X-Replay-Token`
-on every replay POST. A gateway bound to any other address requires that token itself.
+trusts the Next.js process. The browser-facing `/app-data` proxy checks an httpOnly
+capability cookie and attaches `X-Replay-Token` only on the hop to the gateway. A gateway
+bound to any other address requires that token itself.
 
 Viewers idle for `REPLAY_SESSION_TTL_S` (default 1800 seconds) are dropped and their
 playback tasks are cancelled. A viewer read or commanded inside that window stays, including
 one that is still playing. `REPLAY_MAX_VIEWERS` (default 32) rejects another open with
-`429`.
+`429`. `preview` of a recording that is not already an open viewer reconstructs the journal.
+That reconstruction does not take a viewer slot. `REPLAY_MAX_PREVIEWS` (default 4) is the
+number of those reconstructions allowed at once. Another preview fails immediately with
+`429` `replay_preview_busy`. The reconstructed book is dropped before the snapshot is
+returned, so it does not outlive the request. An open viewer's command does not wait on
+a preview.
+
+The browser does not receive `REPLAY_API_TOKEN`. The replay page asks
+`POST /app-data/replay-capability` for an httpOnly cookie (`ce_replay_capability`,
+`REPLAY_CAPABILITY_TTL_S`, default 900 seconds). That cookie is bound to the viewer id
+returned by the first start. The Next route checks the cookie and attaches
+`X-Replay-Token` only on the request it sends to the gateway. A capability cannot command
+another viewer's id.
 
 `GET /api/v1/stream` is the SSE tail. On connect it sends one `resync` whose detection rows
 and `outbox_id` come from a single repeatable-read snapshot, with no 10 000-row cap on the

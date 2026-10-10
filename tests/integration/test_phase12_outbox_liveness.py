@@ -6,17 +6,9 @@ import pytest
 from sqlalchemy import text
 
 from consistency_persistence.db import make_engine, make_sessionmaker
-from consistency_persistence.outbox import committed_notifications
+from consistency_persistence.outbox import committed_notifications, stage_notification
 
 pytestmark = pytest.mark.integration
-
-_INSERT = text(
-    """
-    INSERT INTO notification_outbox (topic, session_id, payload, created_at)
-    VALUES ('detection', NULL, CAST(:payload AS jsonb), CURRENT_TIMESTAMP)
-    RETURNING id
-    """
-)
 
 
 async def test_unrelated_transaction_does_not_stall_committed_notifications(db: str) -> None:
@@ -46,10 +38,10 @@ async def test_unrelated_transaction_does_not_stall_committed_notifications(db: 
         first = await engine.connect()
         try:
             await first.begin()
-            low = int((await first.execute(_INSERT, {"payload": '{"n":1}'})).scalar_one())
+            low = await stage_notification(first, engine, '{"n":1}')
             await first.commit()
             await first.begin()
-            high = int((await first.execute(_INSERT, {"payload": '{"n":2}'})).scalar_one())
+            high = await stage_notification(first, engine, '{"n":2}')
             await first.commit()
         finally:
             await first.close()
@@ -60,9 +52,9 @@ async def test_unrelated_transaction_does_not_stall_committed_notifications(db: 
         assert [note.id for note in notes] == [low, high]
 
         await gap.begin()
-        missing = int((await gap.execute(_INSERT, {"payload": '{"n":"gap"}'})).scalar_one())
+        missing = await stage_notification(gap, engine, '{"n":"gap"}')
         await higher.begin()
-        held = int((await higher.execute(_INSERT, {"payload": '{"n":"held"}'})).scalar_one())
+        held = await stage_notification(higher, engine, '{"n":"held"}')
         await higher.commit()
         assert missing < held
         async with maker() as session:

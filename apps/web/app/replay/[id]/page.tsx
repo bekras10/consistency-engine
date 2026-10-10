@@ -1,7 +1,6 @@
 import { ReplayDesk } from "@/components/replay-desk";
 import { Unavailable } from "@/components/states";
 import { readGateway } from "@/lib/gateway";
-import { expectedReplayToken } from "@/lib/replay-auth";
 import type { ReplaySnapshot } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +15,7 @@ export default async function ReplayPage({ params }: { params: Promise<{ id: str
       <p className="text-sm text-[#9aa0a6]">
         Controls call the in-process PlaybackService. Each start opens a separate viewer. Playback is polled.
       </p>
-      <ReplayDesk replayId={id} initial={result.data} replayToken={expectedReplayToken()} />
+      <ReplayDesk replayId={id} initial={result.data} />
     </div>
   );
 }
