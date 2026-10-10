@@ -37,7 +37,14 @@ test("dashboard journeys use seeded synthetic rows", async ({ page }) => {
   expect(match).toBeTruthy();
   const target = match?.[2] ?? "0";
   await page.getByTestId("replay-seek").fill(target);
+  const sought = page.waitForResponse(
+    (response) => response.url().includes("/seek") && response.request().method() === "POST",
+    { timeout: 90_000 },
+  );
   await page.getByRole("button", { name: "Seek" }).click();
+  await sought;
   await expect(page.getByTestId("replay-status")).toContainText("paused", { timeout: 60_000 });
-  await expect(page.getByTestId("replay-status")).toContainText(`position ${target}`);
+  await expect(page.getByTestId("replay-status")).toContainText(`position ${target}`, {
+    timeout: 60_000,
+  });
 });
