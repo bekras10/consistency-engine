@@ -7,8 +7,9 @@ ingestion. The latest session for a fingerprint decides. A later failed or
 interrupted reseed is resumed. A latest completed session is not ingested
 again unless ``--reseed`` or ``RESEED_SESSION=true``.
 
-``maintain`` runs retention until signaled and rewrites a heartbeat file on a
-short interval. It does not ingest.
+``maintain`` runs retention until signaled. The heartbeat is rewritten on a
+short interval only while that retention task is still running. If the task
+exits or fails, the process records that and exits 1. It does not ingest.
 
 ``health`` prints the latest ingestion status and exits 0 for ``running``,
 ``completed``, and ``interrupted`` when maintenance is fresh or not required.
@@ -85,17 +86,29 @@ async def _run(settings: Settings) -> int:
             await close()
 
 
-async def _pulse(stop: asyncio.Event) -> None:
-    """Rewrite the maintenance heartbeat until ``stop`` is set.
+async def _retention_task(store: DatabaseSessionStore) -> None:
+    """Run retention unless a test asked this task to exit or fail."""
+    fault = os.environ.get("RETENTION_FAULT", "").strip()
+    if fault == "exit":
+        return
+    if fault == "fail":
+        raise RuntimeError("injected retention failure")
+    await store.retention_loop()
 
-    Retention may sleep for an hour. The heartbeat interval is short so a
-    wedged maintenance process becomes stale while this task is still alive.
+
+async def _pulse(stop: asyncio.Event, retention: asyncio.Task[None]) -> None:
+    """Rewrite the heartbeat only while the retention task is still running.
+
+    A timestamp written after that task has exited would hide the failure.
+    Retention may sleep for an hour, so this interval stays short.
     """
     path = heartbeat_path()
     interval = heartbeat_interval_s()
-    while True:
+    while not stop.is_set():
+        if retention.done():
+            return
         try:
-            write_heartbeat(path)
+            write_heartbeat(path, retention="running")
         except OSError:
             log.warning("maintenance heartbeat was not written", extra={"path": str(path)})
         try:
@@ -118,14 +131,34 @@ async def _maintain(settings: Settings) -> int:
         await store.aclose()
         log.error("database unreachable", extra={"error": type(exc).__name__})
         return 2
-    pulse = asyncio.create_task(_pulse(stop), name="maintenance-heartbeat")
-    task = asyncio.create_task(store.retention_loop(), name="retention")
-    await stop.wait()
+    task = asyncio.create_task(_retention_task(store), name="retention")
+    pulse = asyncio.create_task(_pulse(stop, task), name="maintenance-heartbeat")
+    stop_wait = asyncio.create_task(stop.wait())
+    await asyncio.wait({task, stop_wait}, return_when=asyncio.FIRST_COMPLETED)
     pulse.cancel()
-    task.cancel()
-    await asyncio.gather(pulse, task, return_exceptions=True)
+    await asyncio.gather(pulse, return_exceptions=True)
+    if stop.is_set():
+        task.cancel()
+        stop_wait.cancel()
+        await asyncio.gather(task, stop_wait, return_exceptions=True)
+        await store.aclose()
+        return 0
+    stop_wait.cancel()
+    await asyncio.gather(stop_wait, return_exceptions=True)
+    retention = "failed"
+    if task.done() and not task.cancelled():
+        failure = task.exception()
+        retention = "failed" if failure is not None else "exited"
+        if failure is not None:
+            log.error("retention task failed", extra={"error": type(failure).__name__})
+        else:
+            log.error("retention task exited")
+    try:
+        write_heartbeat(heartbeat_path(), retention=retention)
+    except OSError:
+        log.warning("maintenance failure was not recorded")
     await store.aclose()
-    return 0
+    return 1
 
 
 async def _health(settings: Settings) -> int:

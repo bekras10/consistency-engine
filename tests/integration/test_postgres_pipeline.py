@@ -394,6 +394,14 @@ async def test_inconsistent_dataset_classifications_and_lifecycle(db: str) -> No
         assert row.certificate_hash == ev.record.certificate_hash
         assert row.event_count == ev.record.event_count
         assert row.max_deviation == ev.record.max_deviation
-        if ev.evaluation is not None:
-            assert row.certificate_json == ev.evaluation.certificate_json()
+        if ev.record.certificate_json is not None:
+            assert row.certificate_json == ev.record.certificate_json
+            digest = "sha256:" + hashlib.sha256(row.certificate_json.encode()).hexdigest()
+            assert digest == row.certificate_hash
+        if ev.record.closing_certificate_json is not None:
+            assert row.closing_certificate_json == ev.record.closing_certificate_json
+            assert row.closing_certificate_hash == ev.record.closing_certificate_hash
+            assert row.certificate_json != row.closing_certificate_json or (
+                row.certificate_hash == row.closing_certificate_hash
+            )
     await store.aclose()

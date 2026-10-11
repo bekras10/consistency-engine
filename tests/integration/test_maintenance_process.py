@@ -146,3 +146,165 @@ async def _sleep() -> None:
     import asyncio
 
     await asyncio.sleep(0.25)
+
+
+async def _completed(db: str, name: str) -> PersistenceStore:
+    catalog, relationships, _unused = _messages()
+    from consistency_worker.bootstrap import fee_calculator
+    from tests.conftest import FIXTURES
+
+    store = PersistenceStore(db)
+    opened = await store.open(
+        preferred_session_id=f"ses-{name}",
+        fingerprint=f"sha256:{name}",
+        deterministic=True,
+        source_label="synthetic:other",
+        source_kind="synthetic",
+        catalog=catalog,
+        relationships=relationships,
+        fees=fee_calculator(FIXTURES / "fees"),
+        persist_raw=False,
+        pinned=False,
+        batch_size=10,
+        config_document={"test": name},
+    )
+    await store.close_session(opened.session_id, status="completed", detail=None)
+    return store
+
+
+def _maintain_env(db: str, heartbeat: Path, *, fault: str | None) -> dict[str, str]:
+    env = os.environ.copy()
+    env.update(
+        {
+            "DATABASE_URL": db,
+            "PYTHONPATH": _pythonpath(),
+            "RETENTION_INTERVAL_S": "30",
+            "DATA_SOURCE": "synthetic",
+            "EXPECT_MAINTENANCE": "1",
+            "MAINTENANCE_HEARTBEAT_PATH": str(heartbeat),
+            "MAINTENANCE_HEARTBEAT_S": "0.2",
+            "MAINTENANCE_STALE_S": "30",
+        }
+    )
+    if fault is None:
+        env.pop("RETENTION_FAULT", None)
+    else:
+        env["RETENTION_FAULT"] = fault
+    return env
+
+
+async def test_retention_task_exit_is_unhealthy(
+    db: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = await _completed(db, "retention-exit")
+    heartbeat = tmp_path / "heartbeat"
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "consistency_worker", "maintain"],
+        cwd=ROOT,
+        env=_maintain_env(db, heartbeat, fault="exit"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        code = proc.wait(timeout=20)
+        assert code == 1
+        text = heartbeat.read_text(encoding="utf-8")
+        assert "retention=exited" in text
+        monkeypatch.setenv("EXPECT_MAINTENANCE", "1")
+        monkeypatch.setenv("MAINTENANCE_HEARTBEAT_PATH", str(heartbeat))
+        monkeypatch.setenv("MAINTENANCE_STALE_S", "30")
+        from consistency_worker.health import report_health
+
+        assert await report_health(db) == ("unhealthy", 1)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
+        if proc.stdout is not None:
+            proc.stdout.close()
+        if proc.stderr is not None:
+            proc.stderr.close()
+        await store.aclose()
+
+
+async def test_retention_task_failure_is_unhealthy(
+    db: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = await _completed(db, "retention-fail")
+    heartbeat = tmp_path / "heartbeat"
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "consistency_worker", "maintain"],
+        cwd=ROOT,
+        env=_maintain_env(db, heartbeat, fault="fail"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        code = proc.wait(timeout=20)
+        assert code == 1
+        text = heartbeat.read_text(encoding="utf-8")
+        assert "retention=failed" in text
+        monkeypatch.setenv("EXPECT_MAINTENANCE", "1")
+        monkeypatch.setenv("MAINTENANCE_HEARTBEAT_PATH", str(heartbeat))
+        monkeypatch.setenv("MAINTENANCE_STALE_S", "30")
+        from consistency_worker.health import report_health
+
+        assert await report_health(db) == ("unhealthy", 1)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
+        if proc.stdout is not None:
+            proc.stdout.close()
+        if proc.stderr is not None:
+            proc.stderr.close()
+        await store.aclose()
+
+
+async def test_live_maintenance_with_completed_session_stays_healthy(
+    db: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = await _completed(db, "retention-live")
+    heartbeat = tmp_path / "heartbeat"
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "consistency_worker", "maintain"],
+        cwd=ROOT,
+        env=_maintain_env(db, heartbeat, fault=None),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + 15
+        text = ""
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                break
+            if heartbeat.exists():
+                text = heartbeat.read_text(encoding="utf-8")
+                if "retention=running" in text:
+                    break
+            await _sleep()
+        assert proc.poll() is None
+        assert "retention=running" in text
+        monkeypatch.setenv("EXPECT_MAINTENANCE", "1")
+        monkeypatch.setenv("MAINTENANCE_HEARTBEAT_PATH", str(heartbeat))
+        monkeypatch.setenv("MAINTENANCE_STALE_S", "30")
+        from consistency_worker.health import report_health
+
+        assert await report_health(db) == ("completed", 0)
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+        if proc.stdout is not None:
+            proc.stdout.close()
+        if proc.stderr is not None:
+            proc.stderr.close()
+        await store.aclose()

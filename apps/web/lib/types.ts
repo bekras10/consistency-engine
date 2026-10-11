@@ -130,11 +130,21 @@ export type ReplaySnapshot = {
   detections: {
     detection_id: string;
     relationship_id: string;
+    relationship_type?: string | null;
     status: string;
     classification: string;
     net_edge: string | null;
     max_net_edge: string | null;
     theoretical_deviation: string | null;
+    gross_edge?: string | null;
+    fees?: string | null;
+    depth_supported_quantity?: string | null;
+    worst_case_payoff?: string | null;
+    certificate_hash?: string | null;
+    leg_market_ids?: string[];
+    premiums?: { market_id: string | null; side: string | null; quantity: string | null; premium: string | null }[];
+    constraints?: string[];
+    executable?: boolean;
   }[];
   events: {
     detection_id: string;
@@ -146,4 +156,5 @@ export type ReplaySnapshot = {
   timeline: { ordinal: number; now_ms: number; kind: string }[];
   sync: Record<string, unknown>;
   transport: string;
+  source_label?: string | null;
 };

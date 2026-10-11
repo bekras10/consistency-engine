@@ -8,6 +8,7 @@ unhealthy on its own.
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
@@ -62,8 +63,20 @@ async def test_report_health_distinguishes_completed_running_and_failed(db: str)
         await store.aclose()
 
 
-def _maintenance(monkeypatch: pytest.MonkeyPatch, path: Path, *, epoch: float) -> None:
-    path.write_text(f"{epoch:.6f}\n", encoding="utf-8")
+def _maintenance(
+    monkeypatch: pytest.MonkeyPatch,
+    path: Path,
+    *,
+    epoch: float,
+    retention: str = "running",
+    pid: int | None = None,
+    attest: bool = True,
+) -> None:
+    process = os.getpid() if pid is None else pid
+    if attest:
+        path.write_text(f"{epoch:.6f}\nretention={retention}\npid={process}\n", encoding="utf-8")
+    else:
+        path.write_text(f"{epoch:.6f}\n", encoding="utf-8")
     monkeypatch.setenv("EXPECT_MAINTENANCE", "1")
     monkeypatch.setenv("MAINTENANCE_HEARTBEAT_PATH", str(path))
     monkeypatch.setenv("MAINTENANCE_STALE_S", "30")
@@ -112,6 +125,17 @@ async def test_completed_session_with_stale_maintenance_is_unhealthy(
     store = await _completed_session(db)
     try:
         _maintenance(monkeypatch, tmp_path / "heartbeat", epoch=time.time() - 120)
+        assert await report_health(db) == ("unhealthy", 1)
+    finally:
+        await store.aclose()
+
+
+async def test_fresh_timestamp_without_retention_attestation_is_unhealthy(
+    db: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = await _completed_session(db)
+    try:
+        _maintenance(monkeypatch, tmp_path / "heartbeat", epoch=time.time(), attest=False)
         assert await report_health(db) == ("unhealthy", 1)
     finally:
         await store.aclose()

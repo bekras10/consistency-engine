@@ -25,6 +25,7 @@ wait behind a preview.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 import uuid
@@ -40,6 +41,7 @@ from consistency_core.fees import FeeCalculator, FeeSchedule, FeeScheduleRegistr
 from consistency_core.models.market import Market
 from consistency_core.models.relationship import Relationship
 from consistency_core.money import dec_str
+from consistency_core.pricing.portfolio import parse_strategy_id
 from consistency_core.serialization import canonical_json
 from consistency_persistence.dashboard import apply_book, book_view, current_figures, sync_summary
 from consistency_persistence.schema import (
@@ -324,6 +326,7 @@ async def _load_playback(session: AsyncSession, replay_id: str) -> PlaybackSessi
         FeeCalculator(FeeScheduleRegistry(schedules)),
         session_id=replay_id,
         checkpoints=checkpoints,
+        source_label=ingestion.source_label,
     )
 
 
@@ -341,22 +344,72 @@ def _timeline(session: PlaybackSession) -> list[dict[str, object]]:
     return [{"ordinal": item.ordinal, "now_ms": item.now_ms, "kind": item.kind} for item in chosen]
 
 
+def _leg_markets(strategy_id: str) -> list[str]:
+    try:
+        portfolio = parse_strategy_id(strategy_id)
+    except ValueError:
+        return []
+    return [leg.market_id for leg in portfolio.legs]
+
+
+def _premiums(certificate_json: str | None) -> list[dict[str, str | None]]:
+    if not certificate_json:
+        return []
+    body = json.loads(certificate_json)
+    evaluation = body.get("evaluation") if isinstance(body, dict) else None
+    raw_legs = evaluation.get("legs") if isinstance(evaluation, dict) else None
+    if not isinstance(raw_legs, list):
+        return []
+    premiums: list[dict[str, str | None]] = []
+    for leg in raw_legs:
+        if not isinstance(leg, dict):
+            continue
+        walk = leg.get("walk")
+        premium = walk.get("total_premium") if isinstance(walk, dict) else None
+        market_id = leg.get("market_id")
+        side = leg.get("side")
+        quantity = leg.get("quantity")
+        premiums.append(
+            {
+                "market_id": market_id if isinstance(market_id, str) else None,
+                "side": side if isinstance(side, str) else None,
+                "quantity": quantity if isinstance(quantity, str) else None,
+                "premium": premium if isinstance(premium, str) else None,
+            }
+        )
+    return premiums
+
+
 def snapshot(session: PlaybackSession) -> dict[str, Any]:
     manager = session.outcome.manager
     books = [book_view(manager, market_id) for market_id in manager.market_ids]
+    relationships = {item.relationship_id: item for item in session.outcome.engine.relationships}
     detections: list[dict[str, object]] = []
     for record in session.outcome.engine.active_detections():
         dumped = record.model_dump(mode="json")
         figures = current_figures(dumped, record.max_net_edge)
+        relationship = relationships.get(record.relationship_id)
         detections.append(
             {
                 "detection_id": record.detection_id,
                 "relationship_id": record.relationship_id,
+                "relationship_type": None
+                if relationship is None
+                else relationship.relationship_type.value,
                 "status": record.status.value,
                 "classification": record.classification.value,
                 "net_edge": figures["net_edge"],
                 "max_net_edge": figures["max_net_edge"],
                 "theoretical_deviation": figures["theoretical_deviation"],
+                "gross_edge": figures["gross_edge"],
+                "fees": figures["fees"],
+                "depth_supported_quantity": figures["depth_supported_quantity"],
+                "worst_case_payoff": figures["worst_case_payoff"],
+                "certificate_hash": record.certificate_hash,
+                "leg_market_ids": _leg_markets(record.strategy_id),
+                "premiums": _premiums(record.certificate_json),
+                "constraints": [] if relationship is None else list(relationship.constraints),
+                "executable": True,
             }
         )
     events = [
@@ -387,6 +440,7 @@ def snapshot(session: PlaybackSession) -> dict[str, Any]:
         "sync": sync_summary(manager),
         "transport": "polling",
         "recording_id": session.recording_id,
+        "source_label": session.source_label,
     }
 
 
@@ -598,10 +652,16 @@ class ReplayHost:
         elif action == "step":
             self.service.step(replay_id)
         elif action == "seek":
-            raw = payload.get("timestamp_ms")
-            if isinstance(raw, bool) or not isinstance(raw, int):
-                raise ValueError("timestamp_ms must be an integer")
-            self.service.seek(replay_id, raw)
+            if "cursor" in payload:
+                raw_cursor = payload.get("cursor")
+                if isinstance(raw_cursor, bool) or not isinstance(raw_cursor, int):
+                    raise ValueError("cursor must be an integer")
+                self.service.seek_cursor(replay_id, raw_cursor)
+            else:
+                raw = payload.get("timestamp_ms")
+                if isinstance(raw, bool) or not isinstance(raw, int):
+                    raise ValueError("timestamp_ms must be an integer")
+                self.service.seek(replay_id, raw)
         elif action == "speed":
             raw_speed = payload.get("speed")
             if not isinstance(raw_speed, str):

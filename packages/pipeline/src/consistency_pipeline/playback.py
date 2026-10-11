@@ -47,6 +47,7 @@ class PlaybackSession:
         session_id: str,
         checkpoints: list[Checkpoint] | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        source_label: str | None = None,
     ) -> None:
         self.replay_id = replay_id
         self.entries = sorted(entries, key=lambda e: e.ordinal)
@@ -54,6 +55,7 @@ class PlaybackSession:
         self._relationships = relationships
         self._fees = fees
         self._session_id = session_id
+        self.source_label = source_label
         self._checkpoints = list(checkpoints or [])
         self._sleep = sleep
         self.status: PlaybackStatus = "ready"
@@ -96,6 +98,7 @@ class PlaybackSession:
             session_id=self._session_id,
             checkpoints=list(self._checkpoints),
             sleep=self._sleep,
+            source_label=self.source_label,
         )
 
     def set_speed(self, speed: Decimal | str | int) -> Decimal:
@@ -130,7 +133,8 @@ class PlaybackSession:
 
         Seeking forward continues the live applier and does not replay entries already
         applied. Seeking backward rebuilds from the latest checkpoint at or before the
-        target, then applies the following entries once.
+        target, then applies the following entries once. Entries that share a timestamp
+        are all included; use :meth:`seek_cursor` to stop between them.
         """
         self.pause()
         self._stop_task()
@@ -139,6 +143,23 @@ class PlaybackSession:
             self._apply_forward(target)
         else:
             self._rebuild(timestamp_ms, target)
+        self.status = "paused"
+
+    def seek_cursor(self, count: int) -> None:
+        """Jump to the state after the first ``count`` journal entries.
+
+        ``count`` is the prefix length shown as the replay cursor. A later entry with
+        the same pipeline timestamp stays unapplied, so a qualifying sample and a close
+        in one millisecond remain distinct.
+        """
+        if count < 0 or count > len(self.entries):
+            raise ValueError(f"cursor {count} is outside 0..{len(self.entries)}")
+        self.pause()
+        self._stop_task()
+        if count >= self._cursor:
+            self._apply_forward(count)
+        else:
+            self._rebuild_cursor(count)
         self.status = "paused"
 
     def start(self) -> None:
@@ -162,7 +183,7 @@ class PlaybackSession:
 
     def _blank(self) -> tuple[JournalApplier, ReplayOutcome]:
         """Books and detections with no journal entry applied."""
-        manager = BookManager(self._markets, source="replay")
+        manager = BookManager(self._markets, source=self.source_label or "replay")
         engine = DetectionEngine(
             manager, self._relationships, self._fees, session_id=self._session_id
         )
@@ -213,6 +234,38 @@ class PlaybackSession:
         self._applier = applier
         self._outcome = outcome
         self._cursor = target
+
+    def _rebuild_cursor(self, count: int) -> None:
+        """Restore a checkpoint at or before this prefix, then apply once.
+
+        A checkpoint taken later in the same millisecond is past the prefix and is
+        not used.
+        """
+        if count == 0:
+            self._applier, self._outcome = self._blank()
+            self._cursor = 0
+            return
+        target_ordinal = self.entries[count - 1].ordinal
+        eligible = [item for item in self._checkpoints if item.ordinal <= target_ordinal]
+        checkpoint = max(eligible, key=lambda item: item.ordinal) if eligible else None
+        if checkpoint is None:
+            applier, outcome = self._blank()
+            selected = self.entries[:count]
+        else:
+            manager, engine = restore(checkpoint, self._fees)
+            applier = JournalApplier(manager, engine)
+            applier.last_ordinal = checkpoint.ordinal
+            outcome = ReplayOutcome(events=[], manager=manager, engine=engine)
+            selected = [
+                entry for entry in self.entries[:count] if entry.ordinal > checkpoint.ordinal
+            ]
+        events: list[DetectionEvent] = []
+        for entry in selected:
+            events.extend(applier.apply(entry))
+        outcome.events.extend(events)
+        self._applier = applier
+        self._outcome = outcome
+        self._cursor = count
 
     async def _run(self) -> None:
         self.status = "playing"
@@ -287,6 +340,9 @@ class PlaybackService:
 
     def seek(self, replay_id: str, timestamp_ms: int) -> None:
         self.get(replay_id).seek(timestamp_ms)
+
+    def seek_cursor(self, replay_id: str, count: int) -> None:
+        self.get(replay_id).seek_cursor(count)
 
     def set_speed(self, replay_id: str, speed: Decimal | str | int) -> Decimal:
         return self.get(replay_id).set_speed(speed)

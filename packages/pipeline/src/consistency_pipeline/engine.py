@@ -555,6 +555,9 @@ class DetectionEngine:
                 "close_detail": detail,
                 "event_count": det.event_count + 1,
                 "timing": timing,
+                "closing_classification": None if ev is None else ev.classification,
+                "closing_certificate_hash": None if ev is None else ev.certificate_hash,
+                "closing_certificate_json": None if ev is None else ev.certificate_json(),
             }
         )
         slot.detection = rec

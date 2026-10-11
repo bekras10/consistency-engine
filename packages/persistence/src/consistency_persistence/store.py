@@ -475,6 +475,11 @@ async def _reconcile(session: AsyncSession, session_id: str, checkpoint: Checkpo
         row.max_net_edge = rec.max_net_edge
         row.event_count = rec.event_count
         row.certificate_hash = rec.certificate_hash
+        row.closing_classification = (
+            None if rec.closing_classification is None else rec.closing_classification.value
+        )
+        row.closing_certificate_hash = rec.closing_certificate_hash
+        row.closing_certificate_json = rec.closing_certificate_json
         row.record_json = rec.model_dump(mode="json")
 
 
@@ -520,5 +525,10 @@ def _row_from_record(rec: DetectionRecord) -> DetectionRow:
         certificate_hash=rec.certificate_hash,
         certificate_json=rec.certificate_json,
         certificate_version=rec.certificate_version,
+        closing_classification=(
+            None if rec.closing_classification is None else rec.closing_classification.value
+        ),
+        closing_certificate_hash=rec.closing_certificate_hash,
+        closing_certificate_json=rec.closing_certificate_json,
         record_json=rec.model_dump(mode="json"),
     )

@@ -45,13 +45,42 @@ def test_assess_health_separates_session_status_from_maintenance_freshness() -> 
         heartbeat_epoch=fresh,
         now=now,
         stale_after_s=30.0,
+        retention_state="running",
+        process_alive=True,
     ) == ("completed", 0)
+    assert assess_health(
+        "completed",
+        expect_maintenance=True,
+        heartbeat_epoch=fresh,
+        now=now,
+        stale_after_s=30.0,
+    ) == ("unhealthy", 1)
+    assert assess_health(
+        "completed",
+        expect_maintenance=True,
+        heartbeat_epoch=fresh,
+        now=now,
+        stale_after_s=30.0,
+        retention_state="exited",
+        process_alive=True,
+    ) == ("unhealthy", 1)
+    assert assess_health(
+        "completed",
+        expect_maintenance=True,
+        heartbeat_epoch=fresh,
+        now=now,
+        stale_after_s=30.0,
+        retention_state="running",
+        process_alive=False,
+    ) == ("unhealthy", 1)
     assert assess_health(
         "completed",
         expect_maintenance=True,
         heartbeat_epoch=stale,
         now=now,
         stale_after_s=30.0,
+        retention_state="running",
+        process_alive=True,
     ) == ("unhealthy", 1)
     assert assess_health(
         "failed",
@@ -59,6 +88,8 @@ def test_assess_health_separates_session_status_from_maintenance_freshness() -> 
         heartbeat_epoch=fresh,
         now=now,
         stale_after_s=30.0,
+        retention_state="running",
+        process_alive=True,
     ) == ("failed", 1)
     assert assess_health(
         "completed",

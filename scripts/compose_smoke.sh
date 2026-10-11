@@ -222,7 +222,86 @@ if body.get("ok") is not True or "error" in body:
     sys.exit(f"replay start was an error: {raw[:400]}")
 if session_id not in raw:
     sys.exit(f"replay start did not reference session {session_id}")
+viewer = body.get("data", {}).get("replay_id")
+if not isinstance(viewer, str) or not viewer:
+    sys.exit("replay start did not return a viewer id")
 print(f"replay start referenced {session_id}")
 PY
+
+proof="$(psql_at "SELECT detection_id || '|' || certificate_hash || '|' || coalesce(closing_classification,'') || '|' || last_observed_ms::text || '|' || session_id || '|' || coalesce(record_json->>'closed_at_ms','') FROM detections WHERE classification = 'FEE_ADJUSTED_CANDIDATE' AND strategy_id LIKE 'implication|%' ORDER BY max_net_edge DESC NULLS LAST LIMIT 1")"
+proof="$(printf '%s' "$proof" | tr -d '[:space:]')"
+IFS='|' read -r proof_id proof_hash proof_closing proof_ms proof_session proof_closed <<<"$proof"
+if [[ -z "$proof_id" || -z "$proof_hash" || -z "$proof_ms" || -z "$proof_closed" ]]; then
+  echo "no fee-adjusted implication detection to verify" >&2
+  exit 1
+fi
+proof_position="$(psql_at "SELECT last_position::text FROM detections WHERE detection_id = '${proof_id}'")"
+proof_position="$(printf '%s' "$proof_position" | tr -d '[:space:]')"
+proof_cursor="$(psql_at "SELECT count(*) FROM orderbook_updates WHERE session_id = '${proof_session}' AND ordinal <= ${proof_position}")"
+proof_cursor="$(printf '%s' "$proof_cursor" | tr -d '[:space:]')"
+timestamp_cursor="$(psql_at "SELECT count(*) FROM orderbook_updates WHERE session_id = '${proof_session}' AND received_ts_ms <= ${proof_ms}")"
+timestamp_cursor="$(printf '%s' "$timestamp_cursor" | tr -d '[:space:]')"
+if [[ -z "$proof_cursor" || "$proof_cursor" -ge "$timestamp_cursor" ]]; then
+  echo "qualifying cursor ${proof_cursor} is not before the same-timestamp close (timestamp cursor ${timestamp_cursor}, close ${proof_closed})" >&2
+  exit 1
+fi
+cert_json="$(mktemp)"
+psql_at "SELECT certificate_json FROM detections WHERE detection_id = '${proof_id}'" >"$cert_json"
+python3 - "$cert_json" "$proof_hash" "$proof_closing" <<'PY'
+import hashlib, json, pathlib, sys
+raw = pathlib.Path(sys.argv[1]).read_text().strip()
+digest = "sha256:" + hashlib.sha256(raw.encode()).hexdigest()
+if digest != sys.argv[2]:
+    sys.exit(f"certificate hash mismatch {sys.argv[2]} != {digest}")
+body = json.loads(raw)
+if body.get("classification") != "FEE_ADJUSTED_CANDIDATE":
+    sys.exit(f"qualifying classification is {body.get('classification')}")
+if not sys.argv[3] or sys.argv[3] == "FEE_ADJUSTED_CANDIDATE":
+    sys.exit(f"closing classification was not stored separately: {sys.argv[3]!r}")
+print(f"qualifying certificate {sys.argv[2]} matches stored JSON; close is {sys.argv[3]}")
+PY
+rm -f "$cert_json"
+viewer_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"]["replay_id"])' "$replay_body")"
+seek_body="$(mktemp)"
+seek_code="$(curl -sS -o "$seek_body" -w '%{http_code}' -b "$cookie" \
+  -H 'content-type: application/json' \
+  -X POST \
+  --max-time 180 \
+  -d "{\"cursor\": ${proof_cursor}}" \
+  "http://127.0.0.1:${WEB_PORT}/app-data/replay/${viewer_id}/seek")"
+python3 - "$seek_body" "$seek_code" "$proof_id" "$proof_hash" "$proof_ms" "$proof_cursor" <<'PY'
+import json, pathlib, sys
+raw = pathlib.Path(sys.argv[1]).read_text()
+code, detection_id, cert_hash, timestamp, cursor = sys.argv[2:]
+if not code.startswith("2"):
+    sys.exit(f"replay seek returned {code}: {raw[:400]}")
+body = json.loads(raw)
+data = body.get("data") or {}
+if body.get("ok") is not True:
+    sys.exit(f"replay seek failed: {raw[:400]}")
+if str(data.get("position_ms")) != timestamp:
+    sys.exit(f"replay position {data.get('position_ms')} is not {timestamp}")
+if str(data.get("cursor")) != cursor:
+    sys.exit(f"replay cursor {data.get('cursor')} is not the qualifying prefix {cursor}")
+rows = data.get("detections") or []
+match = [row for row in rows if row.get("detection_id") == detection_id]
+if not match:
+    sys.exit(f"detection {detection_id} is not active at the qualifying cursor")
+row = match[0]
+if row.get("classification") != "FEE_ADJUSTED_CANDIDATE":
+    sys.exit(f"replay classification is {row.get('classification')}")
+if row.get("certificate_hash") != cert_hash:
+    sys.exit(f"replay certificate {row.get('certificate_hash')} != stored {cert_hash}")
+legs = row.get("leg_market_ids") or []
+if not any(str(market).startswith("SYNCPI") for market in legs):
+    sys.exit(f"replay is not focused on the CPI legs: {legs}")
+if not row.get("constraints"):
+    sys.exit("replay detection has no nested-threshold constraints")
+print(
+    f"replay cursor {data.get('cursor')}/{data.get('entry_count')} shows {detection_id} "
+    f"with certificate {cert_hash}"
+)
+PY
+rm -f "$seek_body"
 
 echo "compose smoke passed: ${detections} detections, 1 completed session, restart kept the same ids, frontend replay referenced ${session_id}"

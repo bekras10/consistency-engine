@@ -118,8 +118,10 @@ def _memory_fingerprint(
     relationships: list[Relationship],
     fees: FeeCalculator,
     entries: list[JournalEntry],
+    *,
+    source: str,
 ) -> tuple[str, tuple[tuple[str, str, str], ...]]:
-    manager = BookManager(markets, source="replay")
+    manager = BookManager(markets, source=source)
     engine = DetectionEngine(manager, relationships, fees, session_id=session_id)
     applier = JournalApplier(manager, engine)
     events = []
@@ -332,8 +334,14 @@ async def test_replay_pins_recorded_reference_versions(db: str) -> None:
         original = _fingerprint(playback)
         assert original[1]
         assert any(item[2].startswith("sha256:") for item in original[1])
+        recorded_source = playback.source_label or "replay"
         memory = _memory_fingerprint(
-            "ses-provenance", catalog.markets, list(harness.rels), fees, list(playback.entries)
+            "ses-provenance",
+            catalog.markets,
+            list(harness.rels),
+            fees,
+            list(playback.entries),
+            source=recorded_source,
         )
         assert memory == original
         mutated_markets = tuple(
@@ -361,6 +369,7 @@ async def test_replay_pins_recorded_reference_versions(db: str) -> None:
             rejected,
             FeeCalculator(FeeScheduleRegistry(changed_fees)),
             list(playback.entries),
+            source=recorded_source,
         )
         assert poisoned != original
         async with store.sessions() as session, session.begin():

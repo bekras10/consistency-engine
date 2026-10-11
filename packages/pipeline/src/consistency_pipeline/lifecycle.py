@@ -244,6 +244,12 @@ class DetectionRecord(FrozenModel):
     """Canonical proof JSON for ``certificate_hash``. Checkpoints carry it so a restart can
     restore this certificate instead of a later one or an empty field."""
     certificate_version: str | None = None
+    closing_classification: Classification | None = None
+    """Classification of the evaluation that ended the detection. Absent while it is open."""
+    closing_certificate_hash: str | None = None
+    """Hash of ``closing_certificate_json``. Not the qualifying proof hash."""
+    closing_certificate_json: str | None = None
+    """Certificate of the closing evaluation, kept apart from the qualifying proof."""
     metrics: DetectionMetrics
     timing: TimingMeta
 

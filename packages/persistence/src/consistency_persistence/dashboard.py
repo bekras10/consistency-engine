@@ -245,9 +245,23 @@ def explain_detection(item: dict[str, object]) -> str:
     relationship = item.get("relationship_id")
     rel_type = item.get("relationship_type") or "unknown type"
     status = item.get("status")
+    executable = item.get("executable") is True
+    closing = item.get("closing_classification") or item.get("close_reason") or "not recorded"
+    if executable:
+        quote = (
+            f"The open quote's net theoretical edge is {net}. "
+            "That figure is the latest evaluation while this detection is still open."
+        )
+    else:
+        quote = (
+            f"The last qualifying quote has net theoretical edge {net}. "
+            "That quote is retained from the last evaluation that still qualified. "
+            "It is not a currently executable opportunity. "
+            f"The later closing condition is {closing}."
+        )
     return (
         f"Relationship {relationship} ({rel_type}) is recorded as {classification} "
-        f"with status {status}. The current net theoretical edge is {net}. "
+        f"with status {status}. {quote} "
         f"The historical maximum net theoretical edge on this detection is {maximum}. "
         "Those are different fields: a later smaller quote does not replace the maximum, "
         "and the maximum is not shown as the current edge. "
@@ -273,6 +287,11 @@ def technical_report(item: dict[str, object], certificate_json: str | None) -> s
         f"fees: {item.get('fees')}",
         f"depth_supported_quantity: {item.get('depth_supported_quantity')}",
         f"maximum_capacity: {item.get('max_capacity')}",
+        f"executable: {item.get('executable')}",
+        f"quote_label: {item.get('quote_label')}",
+        f"closing_classification: {item.get('closing_classification')}",
+        f"closing_certificate_hash: {item.get('closing_certificate_hash')}",
+        f"close_reason: {item.get('close_reason')}",
         f"certificate_hash: {item.get('certificate_hash')}",
         "",
         "certificate_json:",
@@ -720,8 +739,13 @@ async def get_detection(session: AsyncSession, detection_id: str) -> dict[str, o
     types = await _relationship_types(session)
     figures = current_figures(row.record_json, row.max_net_edge)
     item = _detection_item(row, types.get(row.relationship_id), figures)
+    executable = row.status in {"OPEN", "UPDATED"}
+    item["executable"] = executable
+    item["quote_label"] = "Open quote" if executable else "Last qualifying quote"
     item["certificate_hash"] = row.certificate_hash
     item["certificate_version"] = row.certificate_version
+    item["closing_classification"] = row.closing_classification
+    item["closing_certificate_hash"] = row.closing_certificate_hash
     item["close_reason"] = row.close_reason
     item["close_detail"] = row.close_detail
     item["reason_codes"] = list(row.reason_codes)
@@ -754,6 +778,9 @@ async def get_detection(session: AsyncSession, detection_id: str) -> dict[str, o
     certificate: object = None
     if row.certificate_json:
         certificate = json_ready(json.loads(row.certificate_json))
+    closing_certificate: object = None
+    if row.closing_certificate_json:
+        closing_certificate = json_ready(json.loads(row.closing_certificate_json))
     market_ids = [leg.market_id for leg in legs]
     rules: list[dict[str, object]] = []
     if market_ids:
@@ -804,6 +831,7 @@ async def get_detection(session: AsyncSession, detection_id: str) -> dict[str, o
         ],
         "markets": rules,
         "certificate": certificate,
+        "closing_certificate": closing_certificate,
         "technical_report": technical_report(item, row.certificate_json),
         "record": json_ready(row.record_json),
     }

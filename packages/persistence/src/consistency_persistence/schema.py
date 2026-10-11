@@ -323,6 +323,9 @@ class DetectionRow(Base):
     certificate_hash: Mapped[str] = mapped_column(Text, nullable=False)
     certificate_json: Mapped[str | None] = mapped_column(Text)
     certificate_version: Mapped[str | None] = mapped_column(Text)
+    closing_classification: Mapped[str | None] = mapped_column(Text)
+    closing_certificate_hash: Mapped[str | None] = mapped_column(Text)
+    closing_certificate_json: Mapped[str | None] = mapped_column(Text)
     record_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
 
 

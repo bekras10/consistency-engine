@@ -44,6 +44,7 @@ export function ReplayDesk({ replayId, initial }: { replayId: string; initial: R
   const viewerRef = useRef(replayId);
   const [viewerId, setViewerId] = useState(replayId);
   const [seek, setSeek] = useState(initial.position_ms == null ? "" : String(initial.position_ms));
+  const [cursorSeek, setCursorSeek] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const query = useQuery({
     queryKey: ["replay", viewerId],
@@ -70,7 +71,11 @@ export function ReplayDesk({ replayId, initial }: { replayId: string; initial: R
     client.setQueryData(["replay", viewerRef.current], result);
   }
 
-  const focus = data.books.find((book) => book.yes_bids.length > 0 || book.yes_asks.length > 0) ?? data.books[0];
+  const legIds = new Set(data.detections.flatMap((row) => row.leg_market_ids ?? []));
+  const focused = data.books.filter((book) => legIds.has(book.market_id));
+  const shown = focused.length > 0
+    ? focused
+    : data.books.filter((book) => book.yes_bids.length > 0 || book.yes_asks.length > 0).slice(0, 1);
   return (
     <div className="space-y-4" data-testid="replay">
       <PollLabel />
@@ -120,6 +125,32 @@ export function ReplayDesk({ replayId, initial }: { replayId: string; initial: R
           Range {data.first_ms ?? "—"} to {data.last_ms ?? "—"}
         </span>
       </form>
+      <form
+        className="flex flex-wrap items-center gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const cursor = Number(cursorSeek);
+          if (!Number.isInteger(cursor) || cursor < 0) {
+            setNote("Seek cursor needs a non-negative integer journal prefix.");
+            return;
+          }
+          void run("seek", { cursor });
+        }}
+      >
+        <label className="text-sm text-[#9aa0a6]">
+          Cursor
+          <input
+            data-testid="replay-seek-cursor"
+            className="ml-2 h-8 w-28 rounded-md border border-[#3a4046] bg-[#101214] px-2 font-mono"
+            value={cursorSeek}
+            onChange={(event) => setCursorSeek(event.target.value)}
+          />
+        </label>
+        <Button type="submit">Seek cursor</Button>
+        <span className="text-xs text-[#9aa0a6]">
+          Stops after that many journal entries, including inside one timestamp.
+        </span>
+      </form>
       {note ? <p className="text-sm text-[#f0b4b4]">{note}</p> : null}
       <p className="font-mono text-sm" data-testid="replay-status">
         {data.status} · cursor {data.cursor}/{data.entry_count} · position {data.position_ms ?? "—"} · speed {data.speed}
@@ -129,26 +160,61 @@ export function ReplayDesk({ replayId, initial }: { replayId: string; initial: R
         {data.detections.length === 0 ? (
           <p className="text-sm text-[#9aa0a6]">No active detection at this cursor.</p>
         ) : (
-          <ul className="mt-2 space-y-1 text-sm">
+          <ul className="mt-2 space-y-3 text-sm">
             {data.detections.map((row) => (
-              <li key={row.detection_id}>
-                {row.relationship_id} · {row.status} · {row.classification} · net <Money value={row.net_edge} /> · max <Money value={row.max_net_edge} /> · deviation <Money value={row.theoretical_deviation} />
+              <li key={row.detection_id} data-testid="replay-detection" className="space-y-2">
+                <p>
+                  {row.detection_id} · {row.relationship_id} · {row.relationship_type ?? "relationship"} · {row.status} · {row.classification}
+                </p>
+                <dl className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                  <div><dt className="text-[#9aa0a6]">Gross edge</dt><dd><Money value={row.gross_edge} /></dd></div>
+                  <div><dt className="text-[#9aa0a6]">Modeled fees</dt><dd><Money value={row.fees} /></dd></div>
+                  <div><dt className="text-[#9aa0a6]">Net edge</dt><dd><Money value={row.net_edge} /></dd></div>
+                  <div><dt className="text-[#9aa0a6]">Depth</dt><dd><Money value={row.depth_supported_quantity} /></dd></div>
+                  <div><dt className="text-[#9aa0a6]">Worst-case payoff</dt><dd><Money value={row.worst_case_payoff} /></dd></div>
+                  <div><dt className="text-[#9aa0a6]">Maximum net edge</dt><dd><Money value={row.max_net_edge} /></dd></div>
+                </dl>
+                <p className="text-xs text-[#9aa0a6]">
+                  Open quote on this cursor. These figures are the qualifying evaluation at this journal position, not a fill.
+                </p>
+                {(row.premiums ?? []).length > 0 ? (
+                  <p>
+                    Premium{" "}
+                    {(row.premiums ?? []).map((leg) => (
+                      <span key={`${leg.market_id}-${leg.side}`} className="mr-3">
+                        {leg.market_id} {leg.side} qty <Money value={leg.quantity} /> premium <Money value={leg.premium} />
+                      </span>
+                    ))}
+                  </p>
+                ) : null}
+                {(row.constraints ?? []).length > 0 ? (
+                  <ul data-testid="replay-constraint" className="list-disc pl-5">
+                    {(row.constraints ?? []).map((constraint) => (
+                      <li key={constraint}>{constraint}</li>
+                    ))}
+                  </ul>
+                ) : null}
+                <p data-testid="replay-certificate" className="font-mono text-xs">
+                  certificate {row.certificate_hash}
+                </p>
               </li>
             ))}
           </ul>
         )}
       </section>
-      <section>
-        <h2 className="text-sm font-medium">Book</h2>
-        {focus ? (
-          <>
-            <p className="text-sm">
-              {focus.market_id} · {focus.sync_status} · YES <Money value={focus.best_yes_bid} /> / <Money value={focus.best_yes_ask} />
-            </p>
-            <DepthChart bids={focus.yes_bids} asks={focus.yes_asks} />
-          </>
-        ) : (
+      <section data-testid="replay-books">
+        <h2 className="text-sm font-medium">{focused.length > 0 ? "Books in the active detection" : "Book"}</h2>
+        {shown.length === 0 ? (
           <p className="text-sm text-[#9aa0a6]">The replay has not applied a book yet.</p>
+        ) : (
+          shown.map((book) => (
+            <div key={book.market_id} className="mt-3 space-y-2">
+              <p className="text-sm">
+                {book.market_id} · {book.sync_status} · YES <Money value={book.best_yes_bid} /> / <Money value={book.best_yes_ask} />
+              </p>
+              <DepthChart bids={book.yes_bids} asks={book.yes_asks} />
+            </div>
+          ))
         )}
       </section>
       <section>

@@ -26,6 +26,11 @@ type Detail = {
   depth_supported_quantity: string | null;
   worst_case_payoff?: string | null;
   certificate_hash: string;
+  executable?: boolean;
+  quote_label?: string;
+  closing_classification?: string | null;
+  closing_certificate_hash?: string | null;
+  closing_certificate?: unknown;
   first_observed_ms: number;
   last_observed_ms: number;
   first_position: number;
@@ -81,6 +86,9 @@ export default async function DetectionDetailPage({ params }: { params: Promise<
   if (!result.ok) return <Unavailable error={result.error} detail={result.detail} />;
   const data = result.data;
   const certificate = data.certificate && typeof data.certificate === "object" ? (data.certificate as Record<string, unknown>) : null;
+  const closingCertificate = data.closing_certificate && typeof data.closing_certificate === "object" ? (data.closing_certificate as Record<string, unknown>) : null;
+  const closed = data.executable === false;
+  const quoteLabel = data.quote_label ?? (closed ? "Last qualifying quote" : "Open quote");
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -96,16 +104,27 @@ export default async function DetectionDetailPage({ params }: { params: Promise<
           Replay
         </Link>
       </div>
+      <p data-testid="synthetic-detection" className="rounded-md border border-[#8a6a22] bg-[#2a2416] px-3 py-2 text-sm text-[#f0d48a]">
+        Synthetic simulation. This detection is from the archived recording, not a live Kalshi feed.
+      </p>
       <p data-testid="explanation" className="max-w-3xl text-sm leading-6">{data.explanation}</p>
+      {closed ? (
+        <p data-testid="quote-not-executable" className="max-w-3xl text-sm">
+          {quoteLabel}. The figures below are the retained qualifying quote. They are not a currently executable opportunity.
+        </p>
+      ) : (
+        <p data-testid="quote-open" className="text-sm">{quoteLabel}. This detection is still open.</p>
+      )}
       <p className="text-sm">
         Relationship{" "}
         <Link className="underline" href={`/relationships/${encodeURIComponent(data.relationship_id)}`}>
           {data.relationship_id}
         </Link>{" "}
-        ({data.relationship_type ?? "type not stored"}) · {data.status} · {data.classification}
+        ({data.relationship_type ?? "type not stored"}) · {data.status} · qualifying {data.classification}
       </p>
+      <h2 className="text-sm font-medium">{quoteLabel}</h2>
       <dl className="grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
-        <div><dt className="text-[#9aa0a6]">Current net edge</dt><dd><Money value={data.net_edge} /></dd></div>
+        <div><dt className="text-[#9aa0a6]">{closed ? "Qualifying net edge" : "Net edge"}</dt><dd><Money value={data.net_edge} /></dd></div>
         <div><dt className="text-[#9aa0a6]">Maximum net edge</dt><dd><Money value={data.max_net_edge} /></dd></div>
         <div><dt className="text-[#9aa0a6]">Gross edge</dt><dd><Money value={data.gross_edge} /></dd></div>
         <div><dt className="text-[#9aa0a6]">Fees</dt><dd><Money value={data.fees} /></dd></div>
@@ -193,11 +212,30 @@ export default async function DetectionDetailPage({ params }: { params: Promise<
             ))}
           </tbody>
         </table>
-        <p className="mt-2 font-mono text-xs">certificate {data.certificate_hash}</p>
+        <p data-testid="certificate-hash" className="mt-2 font-mono text-xs">certificate {data.certificate_hash}</p>
+        <p className="text-xs text-[#9aa0a6]">Qualifying certificate. Its hash is SHA-256 of this proof, not of the closing evaluation.</p>
       </section>
-      {section("Walked levels and evaluation", certificate?.evaluation)}
-      {section("Fees in the certificate", certificate?.fees ?? certificate?.fee_schedules)}
+      {section("Qualifying walked levels and evaluation", certificate?.evaluation)}
+      {section("Fees in the qualifying certificate", certificate?.fees ?? certificate?.fee_schedules)}
       {section("Timing and sequence", certificate?.timing)}
+      <section data-testid="closing-condition">
+        <h2 className="text-sm font-medium">Closing condition</h2>
+        <p className="text-sm">
+          {closed
+            ? `Closed as ${data.close_reason ?? data.status}. Closing classification ${data.closing_classification ?? "not stored"}.`
+            : "This detection is still open. There is no later closing evaluation."}
+          {" "}
+          {data.close_detail ?? ""}
+        </p>
+        {data.closing_certificate_hash ? (
+          <p className="mt-2 font-mono text-xs">closing certificate {data.closing_certificate_hash}</p>
+        ) : null}
+        {closingCertificate ? (
+          <p className="mt-2 text-xs text-[#9aa0a6]">
+            Closing classification {String(closingCertificate.classification ?? data.closing_classification)}. This object is not the qualifying proof.
+          </p>
+        ) : null}
+      </section>
       <section>
         <h2 className="text-sm font-medium">Lifecycle</h2>
         <p className="text-sm">

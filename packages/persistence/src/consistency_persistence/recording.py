@@ -8,6 +8,7 @@ notification-outbox row in one transaction.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from collections.abc import Sequence
 from decimal import Decimal
 from typing import Any
@@ -214,24 +215,41 @@ class DetectionWriter:
                 raise self.fault
 
 
+def _require_proof_hash(rec: DetectionRecord) -> None:
+    """The qualifying JSON and its hash are one snapshot. A close must not split them."""
+    if rec.certificate_json is None:
+        return
+    digest = "sha256:" + hashlib.sha256(rec.certificate_json.encode()).hexdigest()
+    if digest != rec.certificate_hash:
+        raise ValueError(f"{rec.detection_id} certificate hash does not match certificate JSON")
+    if rec.closing_certificate_json is None:
+        return
+    closing = "sha256:" + hashlib.sha256(rec.closing_certificate_json.encode()).hexdigest()
+    if closing != rec.closing_certificate_hash:
+        raise ValueError(f"{rec.detection_id} closing certificate hash does not match its JSON")
+
+
 async def _apply_event(session: AsyncSession, ev: DetectionEvent) -> None:
     rec = ev.record
+    _require_proof_hash(rec)
     existing = await session.get(DetectionRow, rec.detection_id)
-    values = _detection_values(rec, ev)
+    values = _detection_values(rec)
+    proof = rec.certificate_json
     if existing is None:
         session.add(DetectionRow(**values))
         await session.flush()
+        if proof is not None:
+            await replace_certificate_projection(session, rec.detection_id, proof)
     else:
+        previous = existing.certificate_json
         for key, value in values.items():
             if key == "certificate_json" and value is None:
                 continue
             if key == "certificate_version" and value is None:
                 continue
             setattr(existing, key, value)
-    if ev.evaluation is not None:
-        await replace_certificate_projection(
-            session, rec.detection_id, ev.evaluation.certificate_json()
-        )
+        if proof is not None and previous != proof:
+            await replace_certificate_projection(session, rec.detection_id, proof)
     payload = json_ready(detection_event_payload(ev))
     if not isinstance(payload, dict):
         raise TypeError("outbox payload must be an object")
@@ -296,9 +314,11 @@ async def replace_certificate_projection(
         )
 
 
-def _detection_values(rec: DetectionRecord, ev: DetectionEvent) -> dict[str, Any]:
-    certificate_json = None if ev.evaluation is None else ev.evaluation.certificate_json()
-    version = None if ev.evaluation is None else ev.evaluation.certificate.certificate_version
+def _detection_values(rec: DetectionRecord) -> dict[str, Any]:
+    """Persist the record's qualifying proof. The closing evaluation is a separate column."""
+    certificate_json = rec.certificate_json
+    version = rec.certificate_version
+    closing = None if rec.closing_classification is None else rec.closing_classification.value
     return {
         "detection_id": rec.detection_id,
         "session_id": rec.session_id,
@@ -326,6 +346,9 @@ def _detection_values(rec: DetectionRecord, ev: DetectionEvent) -> dict[str, Any
         "certificate_hash": rec.certificate_hash,
         "certificate_json": certificate_json,
         "certificate_version": version,
+        "closing_classification": closing,
+        "closing_certificate_hash": rec.closing_certificate_hash,
+        "closing_certificate_json": rec.closing_certificate_json,
         "record_json": rec.model_dump(mode="json"),
     }
 
