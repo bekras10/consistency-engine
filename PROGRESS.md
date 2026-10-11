@@ -632,3 +632,29 @@ second pass at 1817.44 entries/s. Inbound backlog stopped at the 10000 cap. A pr
 open plus PostgreSQL waits. No pricing or detection code was changed after that profile.
 Golden fixtures were not edited and were not re-run in this phase.
 
+Those msg/s figures are a single process with session open included. They are the prior
+run. The remeasurement below does not replace them inside this paragraph.
+
+## Phase 13 audit — 2026-10-10
+
+Tests were added first and failed on the old harness, then the harness was fixed.
+`tests/unit/test_benchmark_harness.py` before the fix: 16 failed, 2 passed.
+`test_omitted_port_is_treated_as_5432` and `test_non_local_host_is_refused` did not raise
+`SystemExit`. `test_explicit_5432_is_refused_unless_opted_in` still exited 2 after
+`BENCHMARK_ALLOW_PORT_5432=1` because that override did not exist. The other failures were
+`AttributeError` for the exit-code, window, recovery-segment, lifecycle, and hardware
+helpers, which the old script did not have. `test_loopback_hosts_on_5433_are_allowed` and
+`test_truthy_words_do_not_enable_the_port_override` already passed because explicit port
+5432 was refused and port 5433 on loopback was allowed.
+
+| Issue | Test | Design |
+|---|---|---|
+| Inconsistency workload | `test_inconsistent_lifecycle_requires_each_kind`; `test_float_money_is_rejected_and_decimals_match`; the benchmark run itself | Seed 505, standard injections, 126000 ms. The run must commit OPENED, UPDATED, RESOLVED, and EXPIRED, and persisted money must match the engine with no float JSON |
+| Exit status | `test_timeout_workload_exits_nonzero`; `test_skipped_workload_exits_nonzero`; `test_successful_smoke_report_exits_zero`; `test_benchmark_smoke_exits_zero` | Timeout, skipped, and error exit 1. A structural smoke report exits 0. A missed speed goal still exits 0 |
+| Cold vs steady | `test_steady_state_excludes_the_cold_window`; `test_variability_reports_min_median_max_mean_and_stdev` | 0.5 s windows start at the first listener entry. Session open is its own number. The cold window is not in the steady median. Three repetitions, each its own process |
+| Database guard | `test_omitted_port_is_treated_as_5432`; `test_explicit_5432_is_refused_unless_opted_in`; `test_non_local_host_is_refused`; `test_guard_failure_does_not_migrate` | Omitted port is 5432. Port 5432 needs `BENCHMARK_ALLOW_PORT_5432=1`. Other hosts need `BENCHMARK_ALLOW_REMOTE=1`. The guard runs before connect and before Alembic |
+| Recovery segments | `test_harness_records_each_recovery_segment`; `test_missing_recovery_segment_fails_the_benchmark`; `test_recovery_stream_produces_gap_request_and_resync` | Gap detection, recovery request, snapshot arrival, and full resynchronization are separate. A dropped econ delta makes the book manager see a real sequence gap |
+| CI smoke and hardware | `test_linux_hardware_does_not_call_sysctl`; `test_darwin_hardware_uses_sysctl`; Actions step "Benchmark smoke" | Linux reads `/proc/cpuinfo` and `/proc/meminfo`. Smoke is 27 markets, short duration, and checks JSON fields rather than a speed goal |
+
+Remeasured with `make benchmark` on the same Apple M3, 16 GiB, Darwin 26.6.2, Python 3.12.11, Docker Postgres 16.15 on port 5433. The process exited 0 in 482.5 s. Steady-state median msg/s (cold excluded): 54 markets 773, 270 markets 794, 1026 markets 666, 5022 markets 0 (mean of those windows 309.76; full-run median 152.79, session open median 38.10 s). Inconsistency workload: OPENED 12, UPDATED 120, EXPIRED 7, RESOLVED 5; money matched the engine; steady median 452 msg/s; certificate p50 0.6041 ms; detection-commit p50 18.3789 ms; end-to-end p50 2281.125 ms. Recovery medians: gap 0.0374 ms, request 0.0490 ms, snapshot arrival 286.3013 ms, full resync 9.2444 ms. Details, scope labels, and the prior table are in `docs/benchmarks.md`. Golden expected values were not edited. Pricing and detection code were not changed.
+

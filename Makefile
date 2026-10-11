@@ -24,7 +24,7 @@ help:
 	@echo "api        run the FastAPI app (health endpoints; readiness checks Postgres)"
 	@echo "dev        Postgres, migrations, synthetic worker, gateway, and Next.js"
 	@echo "build      production build of the Next.js dashboard"
-	@echo "benchmark  synthetic workloads; requires DATABASE_URL on port 5433"
+	@echo "benchmark  synthetic workloads; DATABASE_URL on port 5433 (5432 needs BENCHMARK_ALLOW_PORT_5432=1)"
 
 setup:
 	$(UV) sync

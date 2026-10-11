@@ -1,0 +1,528 @@
+{
+  "synthetic": true,
+  "kalshi_contacted": false,
+  "ci_runs_benchmark": false,
+  "hardware": {
+    "cpu": "Apple M3",
+    "memory_bytes": 17179869184,
+    "os": "Darwin 26.6.2 (arm64)",
+    "python": "3.12.11"
+  },
+  "postgres": "16.15 (Debian 16.15-1.pgdg13+2)",
+  "database": "postgresql+asyncpg://consistency:%2A%2A%2A@127.0.0.1:5433/consistency_bench",
+  "command": [
+    "scripts/benchmark.py"
+  ],
+  "log_level": "WARNING",
+  "message_target": 4000,
+  "focused_markets": 250,
+  "paced_rate": 500,
+  "budget_s": 180,
+  "seed": 606,
+  "latency_window": 10000,
+  "calibration": {
+    "markets_per_instance": 27,
+    "messages_per_instance_ms": 0.101,
+    "generate_s": 0.0172,
+    "duration_ms": 1000,
+    "instances": 1
+  },
+  "workloads": [
+    {
+      "kind": "unpaced",
+      "target_markets": 50,
+      "markets": 54,
+      "instances": 2,
+      "duration_ms": 19750,
+      "rate_per_s": 0,
+      "seed": 606,
+      "generated_messages": 3972,
+      "relationships": 29,
+      "generate_s": 0.1196,
+      "discover_s": 0.0055,
+      "tick_ms": 250,
+      "status": "ok",
+      "reason": null,
+      "wall_s": 3.0321,
+      "cpu_seconds": 2.6461,
+      "cpu_percent_one_core": 87.27,
+      "rss_bytes": 96059392,
+      "ru_maxrss": 96075776,
+      "messages_processed": 3973,
+      "source_messages": 3972,
+      "messages_per_s": 1310.33,
+      "processing_latency": {
+        "n": 3972,
+        "p50_ms": 0.756,
+        "p95_ms": 1.1782,
+        "p99_ms": 1.2947
+      },
+      "detection_latency": {
+        "n": 5764,
+        "p50_ms": 0.3338,
+        "p95_ms": 0.4797,
+        "p99_ms": 0.5371
+      },
+      "detection_event_latency": {
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "p99_ms": null
+      },
+      "outbox_present": true,
+      "gaps_detected": 0,
+      "desync_events": 0,
+      "engine": {
+        "messages": 3972,
+        "evaluations": 5764,
+        "samples": 5764,
+        "sweep_samples": 0,
+        "events": {}
+      },
+      "queue": {
+        "outbox_high_water": 0,
+        "outbox_maxsize": 1024,
+        "inbound_high_water": 3972,
+        "inbound_maxsize": 10000,
+        "outbox_events": 0,
+        "outbox_write_errors": 0
+      },
+      "exchange_counts": {
+        "deltas": 3678,
+        "heartbeats": 228,
+        "messages": 3972,
+        "snapshots": 54
+      },
+      "recovery_snapshots": 0,
+      "session_id": "ses-7fe243ead68472e515f01473",
+      "db_rows": {
+        "orderbook_updates": 3973,
+        "orderbook_snapshots": 54,
+        "detections": 0,
+        "notification_outbox": 0,
+        "session_checkpoints": 2
+      },
+      "db_rows_written": 4029,
+      "db_rows_per_s": 1328.8
+    },
+    {
+      "kind": "unpaced",
+      "target_markets": 250,
+      "markets": 270,
+      "instances": 10,
+      "duration_ms": 4000,
+      "rate_per_s": 0,
+      "seed": 606,
+      "generated_messages": 4284,
+      "relationships": 141,
+      "generate_s": 0.2372,
+      "discover_s": 0.0156,
+      "tick_ms": 250,
+      "status": "ok",
+      "reason": null,
+      "wall_s": 3.9178,
+      "cpu_seconds": 3.1266,
+      "cpu_percent_one_core": 79.8,
+      "rss_bytes": 115884032,
+      "ru_maxrss": 115900416,
+      "messages_processed": 4285,
+      "source_messages": 4284,
+      "messages_per_s": 1093.72,
+      "processing_latency": {
+        "n": 4284,
+        "p50_ms": 0.6167,
+        "p95_ms": 1.1711,
+        "p99_ms": 1.3354
+      },
+      "detection_latency": {
+        "n": 5508,
+        "p50_ms": 0.3371,
+        "p95_ms": 0.4849,
+        "p99_ms": 0.5816
+      },
+      "detection_event_latency": {
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "p99_ms": null
+      },
+      "outbox_present": true,
+      "gaps_detected": 0,
+      "desync_events": 0,
+      "engine": {
+        "messages": 4284,
+        "evaluations": 5508,
+        "samples": 5508,
+        "sweep_samples": 0,
+        "events": {}
+      },
+      "queue": {
+        "outbox_high_water": 0,
+        "outbox_maxsize": 1024,
+        "inbound_high_water": 4284,
+        "inbound_maxsize": 10000,
+        "outbox_events": 0,
+        "outbox_write_errors": 0
+      },
+      "exchange_counts": {
+        "deltas": 3714,
+        "heartbeats": 240,
+        "messages": 4284,
+        "snapshots": 270
+      },
+      "recovery_snapshots": 0,
+      "session_id": "ses-b91cc342fec10dc4590df8f2",
+      "db_rows": {
+        "orderbook_updates": 4285,
+        "orderbook_snapshots": 270,
+        "detections": 0,
+        "notification_outbox": 0,
+        "session_checkpoints": 3
+      },
+      "db_rows_written": 4558,
+      "db_rows_per_s": 1163.4,
+      "replay": {
+        "entries": 4285,
+        "identical": true,
+        "event_mismatches": 0,
+        "classification_mismatches": 0,
+        "entries_per_s": 1817.44,
+        "replay_s": 2.3577,
+        "both_passes_s": 4.8875
+      }
+    },
+    {
+      "kind": "unpaced",
+      "target_markets": 1000,
+      "markets": 1026,
+      "instances": 38,
+      "duration_ms": 1000,
+      "rate_per_s": 0,
+      "seed": 606,
+      "generated_messages": 5160,
+      "relationships": 533,
+      "generate_s": 0.6193,
+      "discover_s": 0.0532,
+      "tick_ms": 250,
+      "status": "ok",
+      "reason": null,
+      "wall_s": 7.8411,
+      "cpu_seconds": 5.5673,
+      "cpu_percent_one_core": 71.0,
+      "rss_bytes": 204963840,
+      "ru_maxrss": 211271680,
+      "messages_processed": 5161,
+      "source_messages": 5160,
+      "messages_per_s": 658.2,
+      "processing_latency": {
+        "n": 5160,
+        "p50_ms": 0.3632,
+        "p95_ms": 1.1749,
+        "p99_ms": 1.3181
+      },
+      "detection_latency": {
+        "n": 6736,
+        "p50_ms": 0.3365,
+        "p95_ms": 0.4873,
+        "p99_ms": 0.5753
+      },
+      "detection_event_latency": {
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "p99_ms": null
+      },
+      "outbox_present": true,
+      "gaps_detected": 0,
+      "desync_events": 0,
+      "engine": {
+        "messages": 5160,
+        "evaluations": 6736,
+        "samples": 6736,
+        "sweep_samples": 0,
+        "events": {}
+      },
+      "queue": {
+        "outbox_high_water": 0,
+        "outbox_maxsize": 1024,
+        "inbound_high_water": 5160,
+        "inbound_maxsize": 10000,
+        "outbox_events": 0,
+        "outbox_write_errors": 0
+      },
+      "exchange_counts": {
+        "deltas": 3678,
+        "heartbeats": 228,
+        "messages": 5160,
+        "snapshots": 1026
+      },
+      "recovery_snapshots": 0,
+      "session_id": "ses-b5826c20ad579ded928292ae",
+      "db_rows": {
+        "orderbook_updates": 5161,
+        "orderbook_snapshots": 1026,
+        "detections": 0,
+        "notification_outbox": 0,
+        "session_checkpoints": 3
+      },
+      "db_rows_written": 6190,
+      "db_rows_per_s": 789.43
+    },
+    {
+      "kind": "unpaced",
+      "target_markets": 5000,
+      "markets": 5022,
+      "instances": 186,
+      "duration_ms": 250,
+      "rate_per_s": 0,
+      "seed": 606,
+      "generated_messages": 10712,
+      "relationships": 2605,
+      "generate_s": 2.6922,
+      "discover_s": 0.4834,
+      "tick_ms": 250,
+      "status": "ok",
+      "reason": null,
+      "wall_s": 34.1739,
+      "cpu_seconds": 24.4979,
+      "cpu_percent_one_core": 71.69,
+      "rss_bytes": 908476416,
+      "ru_maxrss": 1000767488,
+      "messages_processed": 10713,
+      "source_messages": 10712,
+      "messages_per_s": 313.48,
+      "processing_latency": {
+        "n": 10000,
+        "p50_ms": 0.7003,
+        "p95_ms": 1.1837,
+        "p99_ms": 1.3213
+      },
+      "detection_latency": {
+        "n": 15506,
+        "p50_ms": 0.3335,
+        "p95_ms": 0.4884,
+        "p99_ms": 0.5782
+      },
+      "detection_event_latency": {
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "p99_ms": null
+      },
+      "outbox_present": true,
+      "gaps_detected": 0,
+      "desync_events": 0,
+      "engine": {
+        "messages": 10712,
+        "evaluations": 15506,
+        "samples": 15506,
+        "sweep_samples": 0,
+        "events": {}
+      },
+      "queue": {
+        "outbox_high_water": 0,
+        "outbox_maxsize": 1024,
+        "inbound_high_water": 10000,
+        "inbound_maxsize": 10000,
+        "outbox_events": 0,
+        "outbox_write_errors": 0
+      },
+      "exchange_counts": {
+        "deltas": 4574,
+        "messages": 10712,
+        "snapshots": 5022
+      },
+      "recovery_snapshots": 0,
+      "session_id": "ses-bc88602a946e709ffa18059e",
+      "db_rows": {
+        "orderbook_updates": 10713,
+        "orderbook_snapshots": 5022,
+        "detections": 0,
+        "notification_outbox": 0,
+        "session_checkpoints": 6
+      },
+      "db_rows_written": 15741,
+      "db_rows_per_s": 460.61
+    },
+    {
+      "kind": "paced",
+      "target_markets": 250,
+      "markets": 270,
+      "instances": 10,
+      "duration_ms": 2000,
+      "rate_per_s": 500,
+      "seed": 606,
+      "generated_messages": 2409,
+      "relationships": 141,
+      "generate_s": 0.1723,
+      "discover_s": 0.0167,
+      "tick_ms": 250,
+      "status": "ok",
+      "reason": null,
+      "wall_s": 6.3689,
+      "cpu_seconds": 2.6398,
+      "cpu_percent_one_core": 41.45,
+      "rss_bytes": 864698368,
+      "ru_maxrss": 1000767488,
+      "messages_processed": 2410,
+      "source_messages": 2409,
+      "messages_per_s": 378.4,
+      "processing_latency": {
+        "n": 2409,
+        "p50_ms": 0.6212,
+        "p95_ms": 1.2169,
+        "p99_ms": 1.3633
+      },
+      "detection_latency": {
+        "n": 3177,
+        "p50_ms": 0.3434,
+        "p95_ms": 0.5,
+        "p99_ms": 0.5679
+      },
+      "detection_event_latency": {
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "p99_ms": null
+      },
+      "outbox_present": true,
+      "gaps_detected": 0,
+      "desync_events": 0,
+      "engine": {
+        "messages": 2409,
+        "evaluations": 3177,
+        "samples": 3177,
+        "sweep_samples": 0,
+        "events": {}
+      },
+      "queue": {
+        "outbox_high_water": 0,
+        "outbox_maxsize": 1024,
+        "inbound_high_water": 43,
+        "inbound_maxsize": 10000,
+        "outbox_events": 0,
+        "outbox_write_errors": 0
+      },
+      "exchange_counts": {
+        "deltas": 1959,
+        "heartbeats": 120,
+        "messages": 2409,
+        "snapshots": 270
+      },
+      "recovery_snapshots": 0,
+      "session_id": "ses-b13172a20a73de3e370dd890",
+      "db_rows": {
+        "orderbook_updates": 2410,
+        "orderbook_snapshots": 270,
+        "detections": 0,
+        "notification_outbox": 0,
+        "session_checkpoints": 2
+      },
+      "db_rows_written": 2682,
+      "db_rows_per_s": 421.11
+    },
+    {
+      "kind": "recovery",
+      "target_markets": null,
+      "markets": 27,
+      "instances": 1,
+      "duration_ms": 12000,
+      "rate_per_s": 0,
+      "seed": 606,
+      "generated_messages": 1280,
+      "relationships": 15,
+      "generate_s": 0.0377,
+      "discover_s": 0.0039,
+      "tick_ms": 250,
+      "status": "ok",
+      "reason": null,
+      "wall_s": 1.1221,
+      "cpu_seconds": 0.9681,
+      "cpu_percent_one_core": 86.28,
+      "rss_bytes": 855293952,
+      "ru_maxrss": 1000767488,
+      "update_kinds": {
+        "snapshot": 32,
+        "delta": 1170
+      },
+      "recovery_samples": 2,
+      "recovery_p50_ms": 7.9292,
+      "recovery_max_ms": 11.2319,
+      "messages_processed": 1281,
+      "source_messages": 1280,
+      "messages_per_s": 1141.65,
+      "processing_latency": {
+        "n": 1280,
+        "p50_ms": 0.7375,
+        "p95_ms": 1.159,
+        "p99_ms": 1.2452
+      },
+      "detection_latency": {
+        "n": 2078,
+        "p50_ms": 0.3253,
+        "p95_ms": 0.4766,
+        "p99_ms": 0.5145
+      },
+      "detection_event_latency": {
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "p99_ms": null
+      },
+      "outbox_present": true,
+      "gaps_detected": 0,
+      "desync_events": 0,
+      "engine": {
+        "messages": 1280,
+        "evaluations": 2078,
+        "samples": 2078,
+        "sweep_samples": 0,
+        "events": {}
+      },
+      "queue": {
+        "outbox_high_water": 0,
+        "outbox_maxsize": 1024,
+        "inbound_high_water": 1280,
+        "inbound_maxsize": 10000,
+        "outbox_events": 0,
+        "outbox_write_errors": 0
+      },
+      "exchange_counts": {
+        "deltas": 1170,
+        "fault_gap": 1,
+        "heartbeats": 72,
+        "messages": 1280,
+        "recoveries": 1,
+        "snapshots": 32
+      },
+      "recovery_snapshots": 10,
+      "session_id": "ses-1b8774d505b2a2edbbc02520",
+      "db_rows": {
+        "orderbook_updates": 1281,
+        "orderbook_snapshots": 32,
+        "detections": 0,
+        "notification_outbox": 0,
+        "session_checkpoints": 1
+      },
+      "db_rows_written": 1314,
+      "db_rows_per_s": 1171.06
+    }
+  ],
+  "backpressure": {
+    "maxsize": 4,
+    "batches": 40,
+    "writes": 40,
+    "high_water": 4,
+    "bounded": true,
+    "elapsed_s": 0.4387,
+    "delay_s": 0.01
+  },
+  "definitions": {
+    "messages_per_s": "listener entries / worker wall time, including database waits",
+    "processing_latency": "perf_counter around on_message, before outbox backpressure",
+    "detection_latency": "perf_counter around pricing evaluate(), one sample per call",
+    "db_rows_per_s": "journal, outbox, and checkpoint rows divided by worker wall time",
+    "recovery": "per-market wall time from unsynchronized to synchronized",
+    "replay_entries_per_s": "second deterministic replay_catalog pass"
+  }
+}
