@@ -21,6 +21,22 @@ echo "compose smoke project ${project} (frontend 127.0.0.1:${WEB_PORT})"
 # Build the two images first. Worker, gateway, and migrate reuse the API image
 # and must not pull consistency-smoke-api from a registry.
 docker compose -p "$project" "${files[@]}" build api frontend
+
+# Public ECR returns "toomanyrequests: Rate exceeded" when several jobs pull
+# postgres:16 at once. Retry that pull, then start from the local image.
+pulled=0
+for attempt in 1 2 3 4 5 6; do
+  if docker compose -p "$project" "${files[@]}" pull db; then
+    pulled=1
+    break
+  fi
+  echo "postgres pull failed on attempt ${attempt}" >&2
+  sleep $((attempt * 20))
+done
+if [[ "$pulled" != 1 ]]; then
+  echo "postgres image was not pulled" >&2
+  exit 1
+fi
 docker compose -p "$project" "${files[@]}" up -d --no-build
 
 published="$(docker compose -p "$project" "${files[@]}" port db 5432 2>/dev/null || true)"

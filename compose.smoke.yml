@@ -2,7 +2,11 @@
 # consistency-deploy-api and consistency-deploy-web. This override keeps a
 # smoke build from replacing those tags while a local consistency-deploy
 # stack is running. Postgres stays unpublished. Set WEB_PORT to a free port.
+# db pull_policy is missing so `up` uses the image the smoke script already
+# pulled, instead of sending another unauthenticated registry request.
 services:
+  db:
+    pull_policy: missing
   migrate:
     image: consistency-smoke-api
     pull_policy: never

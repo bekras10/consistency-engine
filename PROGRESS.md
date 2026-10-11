@@ -795,3 +795,6 @@ The inconsistency-workload end-to-end median of 2281.125 ms was not remeasured.
 
 Benchmark numbers were not remeasured. Golden expected values were not edited.
 
+Documentation commit `d0ac205` was pushed. GitHub Actions run
+https://github.com/bekras10/consistency-engine/actions/runs/38171909104 finished with conclusion `failure`. Backend, frontend, and e2e succeeded. Compose failed in the postgres pull: `toomanyrequests: Rate exceeded` from the public image registry. `scripts/compose_smoke.sh` now retries that pull, and the smoke override uses `pull_policy: missing` so startup does not send a second request.
+
