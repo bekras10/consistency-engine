@@ -1,22 +1,187 @@
-# Milestone 1: database only. API, worker, and web services are added in later milestones.
+# Local production-shaped stack. Project name consistency-deploy.
+# Postgres is not published. The browser uses only the frontend port.
+# Host tests keep using compose.host-db.yml so this file does not replace
+# the consistency-engine database container.
+name: consistency-deploy
+
+x-python-env: &python-env
+  DATABASE_URL: postgresql+asyncpg://consistency:consistency@db:5432/consistency
+  DATA_SOURCE: synthetic
+  ENABLE_KALSHI_API: "false"
+  KALSHI_AUTHORIZATION_CONFIRMED: "false"
+  ENABLE_LIVE_TRADING: "false"
+  SYNTHETIC_SEED: "20260115"
+  SYNTHETIC_PRESET: inconsistent
+  # Allowed speeds are 0.5, 1, 2, 5, and 10. 10 is the fastest.
+  # The preset is 126000 ms of synthetic time. Speed shortens sleeps only.
+  SYNTHETIC_PLAYBACK_SPEED: "10"
+  FEE_SCHEDULE_DIR: fixtures/fees
+  RELATIONSHIP_REVIEWS_PATH: fixtures/relationships/manual-reviews.yaml
+  PERSIST_MARKET_DATA: "true"
+  OUTBOX_RETENTION_KEEP: "10000"
+  LOG_LEVEL: INFO
+  REPLAY_API_TOKEN: local-replay-token
+  REPLAY_MUTATIONS_PUBLIC: "false"
+  TRUSTED_PROXY_COUNT: "0"
+  TRUSTED_PROXIES: ""
+  API_RATE_MAX_CLIENTS: "4096"
+
 services:
   db:
-    image: postgres:16
+    image: public.ecr.aws/docker/library/postgres:16
     restart: unless-stopped
     environment:
       POSTGRES_USER: consistency
       POSTGRES_PASSWORD: consistency
       POSTGRES_DB: consistency
-    ports:
-      # Host 5432 is often taken by a system Postgres. Override with POSTGRES_PORT.
-      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - db-data:/var/lib/postgresql/data
+      - consistency-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U consistency -d consistency"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 20
+    stop_grace_period: 20s
+    networks: [data]
+
+  migrate:
+    image: consistency-deploy-api
+    entrypoint: ["alembic", "upgrade", "head"]
+    restart: "no"
+    environment:
+      <<: *python-env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [data]
+
+  api:
+    image: consistency-deploy-api
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.api
+    restart: unless-stopped
+    environment:
+      <<: *python-env
+      API_HOST: 0.0.0.0
+      API_PORT: "8000"
+      CORS_ORIGINS: http://127.0.0.1:3000,http://localhost:3000
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/ready', timeout=3)",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 25s
+    stop_grace_period: 20s
+    init: true
+    networks: [data, app]
+
+  worker:
+    image: consistency-deploy-api
+    restart: unless-stopped
+    entrypoint: ["/app/deploy/worker-entry.sh"]
+    environment:
+      <<: *python-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import asyncio, os, sys; from consistency_persistence.db import ping; sys.exit(0 if asyncio.run(ping(os.environ['DATABASE_URL'])) else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    stop_grace_period: 30s
+    init: true
+    networks: [data]
+
+  gateway:
+    image: consistency-deploy-api
+    restart: unless-stopped
+    entrypoint: ["python", "scripts/dashboard_gateway.py"]
+    environment:
+      <<: *python-env
+      DASHBOARD_GATEWAY_HOST: 0.0.0.0
+      DASHBOARD_GATEWAY_PORT: "8765"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/internal/health', timeout=3)",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 20s
+    stop_grace_period: 20s
+    init: true
+    networks: [data, app]
+
+  frontend:
+    image: consistency-deploy-web
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.web
+    restart: unless-stopped
+    environment:
+      DASHBOARD_GATEWAY_URL: http://gateway:8765
+      REPLAY_API_TOKEN: local-replay-token
+      REPLAY_MUTATIONS_PUBLIC: "false"
+      REPLAY_CAPABILITY_TTL_S: "900"
+      REPLAY_CAPABILITY_MAX: "256"
+      REPLAY_CAPABILITY_ISSUE_LIMIT: "30"
+      REPLAY_CAPABILITY_ISSUE_WINDOW_S: "60"
+      REPLAY_CAPABILITY_CLIENT_LIMIT: "5"
+      REPLAY_COOKIE_SECURE: "0"
+      TRUSTED_PROXY_COUNT: "0"
+      TRUSTED_PROXIES: ""
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 20s
+    stop_grace_period: 15s
+    init: true
+    networks: [app]
+
+networks:
+  data:
+    internal: true
+  app:
 
 volumes:
-  db-data:
+  consistency-data:

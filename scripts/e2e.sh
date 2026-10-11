@@ -21,9 +21,10 @@ export REPLAY_MUTATIONS_PUBLIC=false
 if [[ "${E2E_SKIP_COMPOSE:-}" == "1" ]]; then
   uv run --frozen python -c 'import asyncio, os, sys; from consistency_persistence.db import ping; sys.exit(0 if asyncio.run(ping(os.environ["DATABASE_URL"])) else 1)'
 else
-  docker compose up -d db
+  # Host Postgres only. The production compose file does not publish a database.
+  docker compose -p consistency-engine -f compose.host-db.yml up -d db
   for _ in $(seq 1 30); do
-    docker compose exec -T db pg_isready -U consistency -d consistency >/dev/null 2>&1 && break
+    docker compose -p consistency-engine -f compose.host-db.yml exec -T db pg_isready -U consistency -d consistency >/dev/null 2>&1 && break
     sleep 1
   done
 fi

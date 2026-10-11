@@ -1,0 +1,23 @@
+# Host-side tests. Project name consistency-engine, published on POSTGRES_PORT.
+# This is not the Phase 15 stack. docker-compose.yml does not publish Postgres
+# and uses project name consistency-deploy.
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: consistency
+      POSTGRES_PASSWORD: consistency
+      POSTGRES_DB: consistency
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U consistency -d consistency"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  db-data:

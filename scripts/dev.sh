@@ -22,14 +22,14 @@ if [[ ! -d apps/web/node_modules ]]; then
   exit 2
 fi
 
-docker compose up -d db
+docker compose -p consistency-engine -f compose.host-db.yml up -d db
 for _ in $(seq 1 30); do
-  if docker compose exec -T db pg_isready -U consistency -d consistency >/dev/null 2>&1; then
+  if docker compose -p consistency-engine -f compose.host-db.yml exec -T db pg_isready -U consistency -d consistency >/dev/null 2>&1; then
     break
   fi
   sleep 1
 done
-if ! docker compose exec -T db pg_isready -U consistency -d consistency >/dev/null 2>&1; then
+if ! docker compose -p consistency-engine -f compose.host-db.yml exec -T db pg_isready -U consistency -d consistency >/dev/null 2>&1; then
   echo "Postgres did not become ready. The worker and frontend were not started." >&2
   exit 1
 fi

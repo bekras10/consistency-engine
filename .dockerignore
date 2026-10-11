@@ -1,0 +1,17 @@
+.git
+.venv
+.uv-cache
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.next
+**/node_modules
+apps/web/test-results
+apps/web/playwright-report
+apps/web/blob-report
+fixtures/datasets/generated
+.env
+.env.*
+**/.DS_Store

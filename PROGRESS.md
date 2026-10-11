@@ -724,3 +724,35 @@ The first Playwright run after the Origin check, before the loopback fix, failed
 
 The inconsistency-workload end-to-end median of 2281.125 ms was not remeasured. Pricing, detection math, and golden expected values were not changed.
 
+Part A commit `511c3fb` was pushed to `main`. GitHub Actions run
+https://github.com/bekras10/consistency-engine/actions/runs/38166274698 finished with conclusion `success` (backend, frontend including npm audit, Python dependency audit, and Playwright).
+
+## Phase 15 — local deployment — 2026-10-11
+
+Nothing was deployed to a public host. No infrastructure was purchased. The Kalshi connector was not called. Phases 16–20 were not started.
+
+`docker-compose.yml` is project `consistency-deploy`. It does not publish Postgres and does not replace `consistency-engine-db-1`. Host tests use `compose.host-db.yml` with project `consistency-engine`. Images are `deploy/Dockerfile.api` (API, worker, and gateway are one image and three processes) and `deploy/Dockerfile.web` (Next.js standalone). Migrations run in a one-shot `migrate` container and again in the API entrypoint before uvicorn. The worker stays up after the synthetic session so the restart policy does not open another session. Details, stop commands, and the remaining host step are in `docs/deployment.md`.
+
+GitHub Actions does not build the images. The local command that built and started a fresh volume is:
+
+```bash
+docker compose -p consistency-deploy up --build -d
+```
+
+It exited 0. An earlier worker start with `SYNTHETIC_PLAYBACK_SPEED=100` failed because playback speed must be one of 0.5, 1, 2, 5, or 10. The file and the successful run use 10. That speed only shortens sleeps.
+
+Observed on that fresh volume:
+
+- Alembic version `0004_outbox_retention` after `migrate` on an empty volume.
+- Worker log `session finished`, session `ses-6d5d6194d5ee6eead3895a26`, status `completed`, 12 detection rows. The worker wrote them. No fixture loader ran inside the stack.
+- `GET /api/v1/health/ready` from inside the API container: `data_source` synthetic, both enable flags false, `database` ok. `GET /api/v1/detections` returned 12 detection ids. The API port is not published on the host.
+- Frontend published only as `127.0.0.1:3000`. Gateway and Postgres are not published. From the frontend container, DNS lookup of `db` was `ENOTFOUND`. `http://gateway:8765/internal/health` returned `{"ok":true,"database":"ok"}`.
+- After `docker compose restart api`, the detection count was still 12 and the API still listed 12 ids.
+- After `docker compose up -d --force-recreate --no-deps frontend`, the named volume `consistency-deploy_consistency-data` still had 12 detections and the session was `completed`.
+- `consistency-engine-db-1` stayed `9af734e1d5e8` on `0.0.0.0:5433->5432/tcp`.
+- Playwright against `http://127.0.0.1:3000`: `e2e/dashboard.spec.ts` 1 passed (12.8s), then the gateway container was stopped and `e2e/disconnected.spec.ts` 1 passed (141ms). The detection count was still 12 after the gateway was started again.
+
+Host suites on this machine, Docker Postgres 16.15 port 5433: `make lint` clean, `make typecheck` clean (88 source files), `make test` 468 passed in 103.18s. Frontend: Vitest 19 passed (6 files), `tsc --noEmit` clean, `eslint .` clean, `next build` succeeded (Next.js 15.5.27, standalone output). `scripts/e2e.sh` with `E2E_SKIP_COMPOSE=1`, `POSTGRES_PORT=5433`, and `WEB_PORT=3001` (the compose frontend was already on 3000) printed `Replay proxy: 401 without a token; viewers viewer-5ef74b39c42a4502a3c4a18427ed0aa8 and viewer-e861f2435c2a45d589cd4559942155fc seek to cursors 0 and 12277.`, then Playwright `e2e/dashboard.spec.ts` 1 passed (13.4s) and `e2e/disconnected.spec.ts` 1 passed (129ms), then `Playwright passed, including the disconnected page.` The inconsistency-workload end-to-end median of 2281.125 ms was not remeasured inside compose.
+
+The stack was left running as project `consistency-deploy`. Stop it with `docker compose -p consistency-deploy down`. That command does not remove the host-test database.
+

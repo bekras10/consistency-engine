@@ -1,7 +1,14 @@
 import type { Envelope } from "@/lib/types";
 
+function readEnv(name: string): string {
+  const value = process.env[name];
+  return typeof value === "string" ? value : "";
+}
+
+/** Runtime URL. A direct ``process.env.NAME`` read is inlined by ``next build``. */
 export function gatewayBase(): string {
-  return process.env.DASHBOARD_GATEWAY_URL ?? "http://127.0.0.1:8765";
+  const configured = readEnv("DASHBOARD_GATEWAY_URL").trim();
+  return configured || "http://127.0.0.1:8765";
 }
 
 export async function readGateway<T>(path: string, init?: RequestInit): Promise<Envelope<T>> {

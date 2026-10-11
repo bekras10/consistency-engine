@@ -3,7 +3,8 @@ import { capabilityClientKey, issueCapability, replayOriginAllowed } from "@/lib
 export const dynamic = "force-dynamic";
 
 function requestIsSecure(request: Request): boolean {
-  if (process.env.REPLAY_COOKIE_SECURE === "1") return true;
+  const flag = process.env["REPLAY_COOKIE_SECURE"];
+  if (flag === "1") return true;
   return new URL(request.url).protocol === "https:";
 }
 
