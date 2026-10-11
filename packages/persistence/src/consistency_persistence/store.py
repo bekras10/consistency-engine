@@ -1,9 +1,10 @@
 """Session lifecycle on top of the shared repository.
 
-Deterministic sessions left ``interrupted`` (or still ``running`` after a crash) resume from
-the latest checkpoint: the journal is truncated after that ordinal, and detections that were
-written past it are removed so replay cannot duplicate or orphan them. Live sessions are never
-resumed; a ``running`` live session is closed with its open detections invalidated.
+Deterministic sessions left ``running``, ``interrupted``, or ``failed`` resume from the latest
+checkpoint: the journal is truncated after that ordinal, and detections that were written past
+it are removed so replay cannot duplicate or orphan them. A deterministic fingerprint that
+already has a ``completed`` session is not ingested again unless ``reseed`` is set. A
+non-deterministic session is not resumed; a new session id is allocated.
 """
 
 from __future__ import annotations
@@ -69,6 +70,7 @@ class OpenedPersistence:
     checkpoints: CheckpointWriter | None
     sink: DetectionWriter
     resume_from: Checkpoint | None
+    skip_ingest: bool = False
 
 
 class PersistenceStore:
@@ -99,6 +101,7 @@ class PersistenceStore:
         pinned: bool,
         batch_size: int,
         config_document: dict[str, Any],
+        reseed: bool = False,
     ) -> OpenedPersistence:
         versions = _versions(catalog, relationships, fees)
         config_id = sha256_of(config_document)
@@ -137,7 +140,7 @@ class PersistenceStore:
                 kind="market-metadata",
                 document={"markets": [item.model_dump(mode="json") for item in catalog.markets]},
             )
-            session_id, resume = await _allocate(
+            session_id, resume, skip_ingest = await _allocate(
                 session,
                 preferred_session_id=preferred_session_id,
                 fingerprint=fingerprint,
@@ -147,6 +150,7 @@ class PersistenceStore:
                 pinned=pinned,
                 persist_raw=persist_raw,
                 config_version_id=config_id,
+                reseed=reseed,
             )
             await upsert_configuration(
                 session,
@@ -158,14 +162,15 @@ class PersistenceStore:
                     "fee_schedule_version": versions.fee_schedule_version,
                 },
             )
-            session.add(
-                SystemHealthRow(
-                    component="ingestion",
-                    status="starting",
-                    checked_at=now_utc(),
-                    detail={"session_id": session_id, "resumed": resume is not None},
+            if not skip_ingest:
+                session.add(
+                    SystemHealthRow(
+                        component="ingestion",
+                        status="starting",
+                        checked_at=now_utc(),
+                        detail={"session_id": session_id, "resumed": resume is not None},
+                    )
                 )
-            )
         journal = BatchJournal(
             self.sessions,
             session_id,
@@ -180,6 +185,7 @@ class PersistenceStore:
             checkpoints=checkpoints,
             sink=DetectionWriter(self.sessions),
             resume_from=resume,
+            skip_ingest=skip_ingest,
         )
 
     async def close_session(self, session_id: str, *, status: str, detail: str | None) -> None:
@@ -324,6 +330,9 @@ def _versions(
     )
 
 
+_RESUMABLE = frozenset({"running", "interrupted", "failed"})
+
+
 async def _allocate(
     session: AsyncSession,
     *,
@@ -335,10 +344,26 @@ async def _allocate(
     pinned: bool,
     persist_raw: bool,
     config_version_id: str,
-) -> tuple[str, Checkpoint | None]:
-    existing = await session.get(IngestionSessionRow, preferred_session_id)
-    if existing is not None and existing.fingerprint == fingerprint and deterministic:
-        if existing.status in ("interrupted", "running"):
+    reseed: bool = False,
+) -> tuple[str, Checkpoint | None, bool]:
+    """Return ``(session_id, checkpoint, skip_ingest)``.
+
+    ``skip_ingest`` is true when this deterministic fingerprint already completed and
+    ``reseed`` is false. The caller must not append journal rows or detections.
+    """
+    if deterministic and not reseed:
+        rows = list(
+            (
+                await session.execute(
+                    select(IngestionSessionRow)
+                    .where(IngestionSessionRow.fingerprint == fingerprint)
+                    .order_by(IngestionSessionRow.started_at, IngestionSessionRow.session_id)
+                )
+            ).scalars()
+        )
+        resumable = [row for row in rows if row.status in _RESUMABLE]
+        if resumable:
+            existing = resumable[-1]
             resume = await latest_checkpoint(session, existing.session_id)
             if resume is None:
                 await _wipe_runtime(session, existing.session_id)
@@ -350,24 +375,10 @@ async def _allocate(
             existing.detail = None
             existing.raw_persisted = persist_raw
             existing.pinned = pinned
-            return existing.session_id, resume
-        if existing.status in ("interrupted", "running"):
-            await session.execute(
-                update(DetectionRow)
-                .where(
-                    DetectionRow.session_id == existing.session_id,
-                    DetectionRow.status.in_(("OPEN", "UPDATED")),
-                )
-                .values(
-                    status="INVALIDATED",
-                    close_reason="SERVICE_RESTART",
-                    close_detail="SERVICE_RESTART",
-                    closed_at=now_utc(),
-                )
-            )
-            existing.status = "failed"
-            existing.detail = "SERVICE_RESTART"
-            existing.ended_at = now_utc()
+            return existing.session_id, resume, False
+        completed = [row for row in rows if row.status == "completed"]
+        if completed:
+            return completed[-1].session_id, None, True
     session_id = preferred_session_id
     suffix = 2
     while await session.get(IngestionSessionRow, session_id) is not None:
@@ -387,7 +398,7 @@ async def _allocate(
             config_version_id=config_version_id,
         )
     )
-    return session_id, None
+    return session_id, None, False
 
 
 async def _wipe_runtime(session: AsyncSession, session_id: str) -> None:

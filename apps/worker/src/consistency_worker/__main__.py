@@ -1,8 +1,19 @@
-"""Worker entry point: ``python -m consistency_worker [run]``.
+"""Worker entry point: ``python -m consistency_worker [run|maintain|health]``.
 
-``run`` (default) starts the long-running detection service for the configured data source
-(``DATA_SOURCE``, default ``synthetic``). SIGINT / SIGTERM trigger a graceful shutdown. Exit
-status: 0 on completion or graceful stop, 1 when the session failed, 2 on configuration errors.
+``run`` (default) starts detection for the configured data source (``DATA_SOURCE``,
+default ``synthetic``). After a terminal session (``completed`` or ``failed``) the
+process stays up until SIGINT / SIGTERM so a supervisor does not open another
+ingestion. A fingerprint that already completed is not ingested again unless
+``--reseed`` or ``RESEED_SESSION=true``.
+
+``maintain`` runs retention until signaled. It does not ingest.
+
+``health`` prints the latest ingestion status and exits 0 for ``running``,
+``completed``, and ``interrupted``. ``failed`` exits 1.
+
+Exit status of ``run``: 0 on completion, idle stop, or graceful interrupt; 1 is not
+used after a clean failed session because the process stays up for the healthcheck
+and exits 0 when signaled. Configuration errors exit 2.
 """
 
 from __future__ import annotations
@@ -10,12 +21,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import signal
 import sys
 
 from consistency_connectors.settings import ConfigurationError, Settings
 from consistency_connectors.sources.kalshi import KalshiAccessRefusedError
 from consistency_worker import logs
+from consistency_worker.health import report_health
 from consistency_worker.service import SessionStore, WorkerService
 from consistency_worker.store import DatabaseSessionStore
 
@@ -30,41 +43,99 @@ async def _store(settings: Settings) -> SessionStore | None:
     try:
         await store.ping()
     except Exception as exc:
+        await store.aclose()
         log.error("database unreachable", extra={"error": type(exc).__name__})
         raise ConfigurationError("database unreachable") from exc
     log.info("persistence enabled", extra=settings.persistence_summary())
     return store
 
 
-async def _run(settings: Settings) -> int:
-    stop = asyncio.Event()
+def _signals(stop: asyncio.Event) -> None:
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop.set)
+
+
+async def _run(settings: Settings) -> int:
+    stop = asyncio.Event()
+    _signals(stop)
     store = await _store(settings)
     try:
         result = await WorkerService(settings, store=store).run(stop)
+        if not stop.is_set() and result.status in {"completed", "failed"}:
+            log.info(
+                "session is terminal; waiting for SIGTERM",
+                extra={"session_id": result.session_id, "status": result.status},
+            )
+            await stop.wait()
+        return 0
     finally:
         close = getattr(store, "aclose", None)
         if close is not None:
             await close()
-    return 1 if result.status == "failed" else 0
+
+
+async def _maintain(settings: Settings) -> int:
+    if not settings.database_url:
+        log.error("DATABASE_URL is required for maintenance")
+        return 2
+    stop = asyncio.Event()
+    _signals(stop)
+    store = DatabaseSessionStore(settings)
+    try:
+        await store.ping()
+    except Exception as exc:
+        await store.aclose()
+        log.error("database unreachable", extra={"error": type(exc).__name__})
+        return 2
+    task = asyncio.create_task(store.retention_loop(), name="retention")
+    await stop.wait()
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    await store.aclose()
+    return 0
+
+
+async def _health(settings: Settings) -> int:
+    if not settings.database_url:
+        print("starting")
+        return 1
+    label, code = await report_health(settings.database_url)
+    print(label)
+    return code
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="consistency-worker")
-    parser.add_argument("command", nargs="?", default="run", choices=["run"])
-    parser.parse_args(argv)
+    parser.add_argument("command", nargs="?", default="run", choices=["run", "maintain", "health"])
+    parser.add_argument(
+        "--reseed",
+        action="store_true",
+        help=(
+            "Allocate a new ingestion session even when this fingerprint already "
+            "completed. Default off. Same as RESEED_SESSION=true."
+        ),
+    )
+    args = parser.parse_args(argv)
+    if args.reseed:
+        os.environ["RESEED_SESSION"] = "true"
     try:
         settings = Settings()
     except (ConfigurationError, ValueError) as exc:
         sys.stderr.write(f"consistency-worker: configuration refused: {exc}\n")
         return 2
+    if args.command == "health":
+        return asyncio.run(_health(settings))
     logs.configure(settings.log_level)
     try:
+        if args.command == "maintain":
+            return asyncio.run(_maintain(settings))
         return asyncio.run(_run(settings))
     except (KalshiAccessRefusedError, NotImplementedError) as exc:
         log.error("kalshi data source refused", extra={"error": str(exc)})
+        return 2
+    except ConfigurationError as exc:
+        log.error("worker configuration refused", extra={"error": str(exc)})
         return 2
 
 

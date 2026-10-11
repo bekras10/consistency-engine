@@ -7,7 +7,9 @@ Session outcomes:
   checkpoint is written and the session is marked ``completed`` / ``failed``;
 * deterministic source stopped (signal) or crashed: the session stays ``interrupted``; the next
   start with the same input fingerprint resumes from its latest checkpoint (the store discards
-  everything recorded after it), which yields exactly the uninterrupted result;
+  everything recorded after it), which yields exactly the uninterrupted result. A ``failed``
+  session resumes the same way. A fingerprint that already ``completed`` is not ingested again
+  unless ``RESEED_SESSION`` is set;
 * live source stopped: open detections are closed and the session is ``stopped``. A live session
   cannot be resumed; a store finding one still ``running`` at startup (crash) invalidates its open
   detections with ``SERVICE_RESTART``.
@@ -62,6 +64,7 @@ class OpenedSession:
     checkpoints: CheckpointStore | None = None
     sink: DetectionSink | None = None
     resume_from: Checkpoint | None = None
+    skip_ingest: bool = False
 
 
 class SessionStore(Protocol):
@@ -148,6 +151,18 @@ class WorkerService:
             if self.store is not None
             else OpenedSession(session_id=default_session_id(inputs))
         )
+        if opened.skip_ingest:
+            log.info(
+                "completed session already stored; not ingesting",
+                extra={"session_id": opened.session_id, "source": inputs.source_label},
+            )
+            return WorkerResult(
+                session_id=opened.session_id,
+                status="completed",
+                detail="already_completed",
+                resumed_from=None,
+                restarts=0,
+            )
         resume = opened.resume_from
         if resume is not None:
             manager, engine = cp.restore(resume, inputs.fees)
@@ -235,9 +250,6 @@ class WorkerService:
             asyncio.create_task(outbox.run(), name="outbox"),
             asyncio.create_task(self._feed(updates, manager), name="market-feed"),
         ]
-        retain = getattr(self.store, "retention_loop", None)
-        if retain is not None:
-            background.append(asyncio.create_task(retain(), name="retention"))
         if not inputs.deterministic:
             background.append(asyncio.create_task(self._ticker(listener), name="ticker"))
         sup_task = asyncio.create_task(supervisor.run(), name="supervisor")

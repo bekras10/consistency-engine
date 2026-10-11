@@ -105,11 +105,16 @@ capabilities are outstanding (default 256), and at most
 (default 30 per 60 seconds). A single client is also limited to
 `REPLAY_CAPABILITY_CLIENT_LIMIT` (default 5) in that same window, so one
 caller cannot spend the global budget. Past either cap the response is `429`.
-The Next route does not see the TCP peer. It ignores `X-Forwarded-For` unless
-both `TRUSTED_PROXY_COUNT` and `TRUSTED_PROXIES` are set, and then uses the
-same rightmost-hop rule. While they are unset, every issuer shares one key,
-so rotating the header does not create another bucket. Set those variables
-only when Next is reached solely through that proxy.
+`X-Forwarded-For` is ignored unless `TRUSTED_PROXY_COUNT` is at least 1 and the
+immediate TCP peer is listed in `TRUSTED_PROXIES`. The client is then the
+address that many hops from the right. A route `Request` has no socket, so the
+peer is unknown and the header stays ignored. While the peer is not trusted,
+every issuer shares one key, so rotating the header does not create another
+bucket. Set those variables only when Next is reached solely through that
+proxy and the server can see that proxy as the TCP peer. Expired client keys
+are dropped on the next issuance. At most `REPLAY_CAPABILITY_MAX_CLIENTS`
+(default 4096) identities are stored. A new identity past that cap is `429`
+and is not inserted.
 
 Replay mutations reject a cross-site `Origin` with `403` `{"error":"cross_origin"}`.
 Same-origin is allowed. A missing `Origin` is allowed because non-browser
@@ -149,7 +154,10 @@ rewind the id sequence. A reader still below the floor receives no notes and a
 blocked cursor, and the SSE tail resyncs from the detection snapshot. The pruned
 prefix is not delivered as a skip.
 
-The worker retention loop, on `RETENTION_INTERVAL_S`, also runs that prune.
+`python -m consistency_worker maintain`, on `RETENTION_INTERVAL_S`, runs that
+prune. The worker entrypoint starts this process and keeps it after ingestion
+finishes. It does not ingest. A finite synthetic session no longer cancels
+retention by exiting.
 The consumer watermark is the contiguous commit-safe id. `OUTBOX_RETENTION_KEEP`
 (default 10000) is how many of the newest ids stay. The delete target is
 `watermark - OUTBOX_RETENTION_KEEP` and is never above the watermark. A client

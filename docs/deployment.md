@@ -43,11 +43,19 @@ Host tests use `compose.host-db.yml` with project `consistency-engine` and
 
 The `migrate` container runs `alembic upgrade head` and exits. The API
 entrypoint runs the same upgrade again, then execs uvicorn so SIGTERM reaches
-the server. The worker runs `python -m consistency_worker`. When the synthetic
-session finishes, the process stays up until SIGTERM so a restart policy does
-not open a second session. `stop_grace_period` is 30s on the worker and 20s on
-the API. Restart policy is `unless-stopped` except for the one-shot migrate
-container.
+the server. The worker entrypoint starts two processes:
+`python -m consistency_worker maintain` and `python -m consistency_worker`.
+Maintenance applies retention on `RETENTION_INTERVAL_S` and keeps running after
+ingestion finishes. The ingestion process stays up after a terminal session
+until SIGTERM. On startup, if this fingerprint already has a completed
+ingestion session, it does not ingest again. A `running`, `interrupted`, or
+`failed` session resumes from its checkpoint. `RESEED_SESSION=true` or
+`python -m consistency_worker run --reseed` allocates a new session. The
+default is false. `stop_grace_period` is 30s on the worker and 20s on the
+API. Restart policy is `unless-stopped` except for the one-shot migrate
+container. If either worker process exits on its own, the entrypoint exits
+non-zero so both come back together. A completed fingerprint is not opened
+twice by that restart.
 
 Compose sets `DATA_SOURCE=synthetic`, `SYNTHETIC_PRESET=inconsistent`, and
 `SYNTHETIC_PLAYBACK_SPEED=10`. Allowed playback speeds are 0.5, 1, 2, 5, and
@@ -91,11 +99,38 @@ that document. That is a latency limit of this engine, not a slogan. This
 compose stack was not used for a new benchmark, and no new number is claimed
 here.
 
+## Worker health
+
+`python -m consistency_worker health` is the compose healthcheck. It reads the
+latest ingestion session. It does not treat a successful PostgreSQL ping as
+enough.
+
+| Status | Printed word | Exit | Meaning |
+|---|---|---|---|
+| `running` | `running` | 0 | Ingestion is in progress |
+| `completed` | `completed` | 0 | The deterministic session finished. This is an expected terminal state |
+| `interrupted` | `interrupted` | 0 | The journal stopped early. The next start resumes it |
+| `failed` | `failed` | 1 | Processing failed. The container is unhealthy |
+| no row yet | `starting` | 1 | The session has not been opened |
+| database error | `unhealthy` | 1 | The status could not be read |
+
+A completed demo stays healthy. Failed processing does not. `running` and
+`completed` share exit 0 so Compose can mark both healthy; the printed word
+distinguishes them.
+
 ## CI
 
-GitHub Actions runs the host test suites. It does not build these images.
-The image build and the compose run are local. The command that built and
-started the stack on this machine is recorded in `PROGRESS.md`.
+GitHub Actions runs the host test suites and `scripts/compose_smoke.sh`. That
+job builds these images, starts a fresh database on the compose network
+without publishing Postgres, waits until the synthetic worker has written
+detections, calls `GET /api/v1/detections`, restarts the worker and the API,
+and checks the detection ids are unchanged. It tears down only its own
+project. The local command that builds and starts the stack on a machine is
+still:
+
+```bash
+docker compose -p consistency-deploy up --build -d
+```
 
 ## A real host, not performed
 

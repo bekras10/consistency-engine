@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     synthetic_seed: int = Field(default=20260115, alias="SYNTHETIC_SEED")
     synthetic_playback_speed: float = Field(default=1.0, alias="SYNTHETIC_PLAYBACK_SPEED")
     synthetic_preset: str = Field(default="inconsistent", alias="SYNTHETIC_PRESET")
+    # When false, a fingerprint that already has a completed ingestion session is not
+    # ingested again. Set true, or pass --reseed, to allocate a new session on purpose.
+    reseed_session: bool = Field(default=False, alias="RESEED_SESSION")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
     # Reference data

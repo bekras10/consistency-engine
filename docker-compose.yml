@@ -95,13 +95,7 @@ services:
       migrate:
         condition: service_completed_successfully
     healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import asyncio, os, sys; from consistency_persistence.db import ping; sys.exit(0 if asyncio.run(ping(os.environ['DATABASE_URL'])) else 1)",
-        ]
+      test: ["CMD", "python", "-m", "consistency_worker", "health"]
       interval: 10s
       timeout: 5s
       retries: 12

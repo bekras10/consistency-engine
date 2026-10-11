@@ -1,33 +1,47 @@
 #!/bin/sh
-# Run one synthetic session. After it finishes, wait for SIGTERM instead of
-# exiting, so the restart policy does not open another session.
+# Retention and ingestion run as two processes. Ingestion stays up after a
+# terminal session (it does not open another one). If either process exits on
+# its own, this script exits non-zero so the container comes back with both.
+# A signal stops both and exits 0. There is no sleeping shell that leaves
+# retention unscheduled.
 set -eu
+maint=0
 child=0
-stopped=0
+stop=0
 term() {
-  stopped=1
+  stop=1
   if [ "$child" -ne 0 ]; then
     kill -TERM "$child" 2>/dev/null || true
+  fi
+  if [ "$maint" -ne 0 ]; then
+    kill -TERM "$maint" 2>/dev/null || true
   fi
 }
 trap term TERM INT
 
+python -m consistency_worker maintain &
+maint=$!
 python -m consistency_worker &
 child=$!
-set +e
-wait "$child"
-status=$?
-set -e
-if [ "$stopped" -eq 1 ]; then
-  exit "$status"
+
+while [ "$stop" -eq 0 ]; do
+  if ! kill -0 "$child" 2>/dev/null; then
+    break
+  fi
+  if ! kill -0 "$maint" 2>/dev/null; then
+    break
+  fi
+  sleep 1
+done
+
+if [ "$stop" -eq 1 ]; then
+  wait "$child" 2>/dev/null || true
+  wait "$maint" 2>/dev/null || true
+  exit 0
 fi
-if [ "$status" -ne 0 ]; then
-  exit "$status"
-fi
-echo "synthetic session finished; waiting for SIGTERM" >&2
-trap 'exit 0' TERM INT
-sleep infinity &
-child=$!
-set +e
-wait "$child"
-exit 0
+
+kill -TERM "$child" 2>/dev/null || true
+kill -TERM "$maint" 2>/dev/null || true
+wait "$child" 2>/dev/null || true
+wait "$maint" 2>/dev/null || true
+exit 1

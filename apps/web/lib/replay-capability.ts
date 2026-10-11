@@ -64,9 +64,27 @@ export function issueWindowMs(): number {
   return positiveInt("REPLAY_CAPABILITY_ISSUE_WINDOW_S", 60) * 1000;
 }
 
+export function capabilityMaxClients(): number {
+  return positiveInt("REPLAY_CAPABILITY_MAX_CLIENTS", 4096);
+}
+
+export function issuedClientCount(): number {
+  return issuedByClient.size;
+}
+
 export function pruneExpired(now = Date.now()): void {
   for (const [id, cap] of capabilities) {
     if (cap.expiresAt <= now) capabilities.delete(id);
+  }
+  pruneIssuedClients(now);
+}
+
+function pruneIssuedClients(now: number): void {
+  const windowMs = issueWindowMs();
+  for (const [client, stamps] of issuedByClient) {
+    const fresh = stamps.filter((stamp) => now - stamp <= windowMs);
+    if (fresh.length === 0) issuedByClient.delete(client);
+    else issuedByClient.set(client, fresh);
   }
 }
 
@@ -110,25 +128,43 @@ export function replayOriginAllowed(request: Request): boolean {
 }
 
 /**
+ * TCP peer of this request, when the server attached a socket.
+ *
+ * A Fetch ``Request`` in a route handler has no socket. An empty string means
+ * the peer is unknown, and ``X-Forwarded-For`` is ignored.
+ */
+export function requestPeer(request: Request): string {
+  const withSocket = request as Request & { socket?: { remoteAddress?: string | null } };
+  const addr = withSocket.socket?.remoteAddress;
+  return typeof addr === "string" ? addr.trim() : "";
+}
+
+/**
  * Client key for issuance throttling.
  *
- * Route handlers do not see the TCP peer. ``X-Forwarded-For`` is ignored unless
- * both ``TRUSTED_PROXY_COUNT`` (>= 1) and ``TRUSTED_PROXIES`` are set. The key
- * is then the address that many hops from the right. A direct client cannot
- * rotate the header into a second bucket while those variables are unset.
- * Set them only when this process is reached through that proxy, which appends
- * the previous hop and is the only path to Next.
+ * ``X-Forwarded-For`` is ignored unless ``TRUSTED_PROXY_COUNT`` is at least 1,
+ * ``TRUSTED_PROXIES`` lists the immediate TCP peer, and that peer was passed in.
+ * The key is then the address that many hops from the right (the hop a trusted
+ * proxy appended). Entries further left are client-controlled. A missing or
+ * unlisted peer shares the key ``direct``, so rotating the header does not open
+ * a new bucket.
  */
-export function capabilityClientKey(request: Request): string {
+export function capabilityClientKey(request: Request, peer?: string | null): string {
   const proxies = readEnv("TRUSTED_PROXIES")
     .split(",")
     .map((part) => part.trim())
     .filter((part) => part.length > 0);
   const rawCount = readEnv("TRUSTED_PROXY_COUNT").trim();
   const count = Number(rawCount);
-  if (proxies.length === 0 || rawCount === "" || !Number.isFinite(count) || count < 1) {
-    return "direct";
-  }
+  const hop = typeof peer === "string" ? peer.trim() : "";
+  const trusted =
+    proxies.length > 0 &&
+    rawCount !== "" &&
+    Number.isFinite(count) &&
+    count >= 1 &&
+    hop.length > 0 &&
+    proxies.includes(hop);
+  if (!trusted) return "direct";
   const parts = (request.headers.get("x-forwarded-for") ?? "")
     .split(",")
     .map((part) => part.trim())
@@ -145,10 +181,10 @@ export function issueCapability(
   const windowMs = issueWindowMs();
   while (issuedAt.length > 0 && now - issuedAt[0] > windowMs) issuedAt.shift();
   const client = opts?.client && opts.client.length > 0 ? opts.client : "direct";
+  const known = issuedByClient.has(client);
   const mine = issuedByClient.get(client) ?? [];
-  while (mine.length > 0 && now - mine[0] > windowMs) mine.shift();
-  if (mine.length === 0) issuedByClient.delete(client);
   if (
+    (!known && issuedByClient.size >= capabilityMaxClients()) ||
     mine.length >= clientIssueLimit() ||
     issuedAt.length >= issueLimit() ||
     capabilities.size >= capabilityMax()

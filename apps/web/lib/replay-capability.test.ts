@@ -3,8 +3,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { POST as issueRoute } from "../app/app-data/replay-capability/route";
 import { POST as proxy } from "../app/app-data/[...path]/route";
 import {
+  capabilityClientKey,
   clearCapabilities,
   issueCapability,
+  issuedClientCount,
   outstandingCapabilities,
   pruneExpired,
   replayOriginAllowed,
@@ -20,6 +22,7 @@ const saved = {
   gateway: process.env.DASHBOARD_GATEWAY_URL,
   proxies: process.env.TRUSTED_PROXIES,
   proxyCount: process.env.TRUSTED_PROXY_COUNT,
+  maxClients: process.env.REPLAY_CAPABILITY_MAX_CLIENTS,
 };
 
 afterEach(() => {
@@ -33,6 +36,7 @@ afterEach(() => {
   restore("DASHBOARD_GATEWAY_URL", saved.gateway);
   restore("TRUSTED_PROXIES", saved.proxies);
   restore("TRUSTED_PROXY_COUNT", saved.proxyCount);
+  restore("REPLAY_CAPABILITY_MAX_CLIENTS", saved.maxClients);
 });
 
 function restore(name: string, value: string | undefined) {
@@ -153,6 +157,48 @@ describe("replay capability limits", () => {
     );
     expect(rotated.status).toBe(429);
     expect(await rotated.json()).toEqual({ error: "rate_limited" });
+  });
+
+  it("drops expired one-time clients and refuses a client past the map cap", () => {
+    process.env.REPLAY_CAPABILITY_MAX_CLIENTS = "3";
+    process.env.REPLAY_CAPABILITY_ISSUE_WINDOW_S = "10";
+    process.env.REPLAY_CAPABILITY_CLIENT_LIMIT = "5";
+    process.env.REPLAY_CAPABILITY_ISSUE_LIMIT = "100";
+    process.env.REPLAY_CAPABILITY_MAX = "100";
+    for (let i = 0; i < 3; i += 1) {
+      const issued = issueCapability(1_000, { client: `once-${i}` });
+      expect(issued.ok).toBe(true);
+    }
+    expect(issuedClientCount()).toBe(3);
+    const blocked = issueCapability(1_001, { client: "once-new" });
+    expect(blocked).toEqual({ ok: false, error: "rate_limited" });
+    expect(issuedClientCount()).toBe(3);
+    const later = issueCapability(1_000 + 10_000 + 1, { client: "later" });
+    expect(later.ok).toBe(true);
+    expect(issuedClientCount()).toBe(1);
+  });
+
+  it("ignores X-Forwarded-For unless the TCP peer is a trusted proxy", async () => {
+    process.env.TRUSTED_PROXIES = "10.0.0.8";
+    process.env.TRUSTED_PROXY_COUNT = "1";
+    process.env.REPLAY_CAPABILITY_CLIENT_LIMIT = "1";
+    process.env.REPLAY_CAPABILITY_ISSUE_LIMIT = "10";
+    const forwarded = (value: string) =>
+      new Request("http://dashboard.test/app-data/replay-capability", {
+        method: "POST",
+        headers: { "x-forwarded-for": value },
+      });
+    const untrustedA = capabilityClientKey(forwarded("203.0.113.5"), "192.0.2.10");
+    const untrustedB = capabilityClientKey(forwarded("203.0.113.99"), "192.0.2.10");
+    expect(untrustedA).toBe(untrustedB);
+    expect(capabilityClientKey(forwarded("203.0.113.5"), "10.0.0.8")).toBe("203.0.113.5");
+    expect(capabilityClientKey(forwarded("198.51.100.7, 203.0.113.5"), "10.0.0.8")).toBe(
+      "203.0.113.5",
+    );
+    const first = await issueRoute(forwarded("203.0.113.5"));
+    expect(first.status).toBe(200);
+    const rotated = await issueRoute(forwarded("203.0.113.99"));
+    expect(rotated.status).toBe(429);
   });
 
   it("allows a loopback Origin when Next rewrites the request URL to localhost", () => {

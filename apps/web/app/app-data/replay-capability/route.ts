@@ -1,4 +1,9 @@
-import { capabilityClientKey, issueCapability, replayOriginAllowed } from "@/lib/replay-capability";
+import {
+  capabilityClientKey,
+  issueCapability,
+  replayOriginAllowed,
+  requestPeer,
+} from "@/lib/replay-capability";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +23,7 @@ export async function POST(request: Request) {
   }
   const issued = issueCapability(Date.now(), {
     secure: requestIsSecure(request),
-    client: capabilityClientKey(request),
+    client: capabilityClientKey(request, requestPeer(request)),
   });
   if (!issued.ok) {
     return new Response(JSON.stringify({ error: "rate_limited" }), {

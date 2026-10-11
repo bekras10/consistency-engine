@@ -47,6 +47,8 @@ trap cleanup EXIT
 
 uv run --frozen python scripts/dashboard_gateway.py &
 pids+=("$!")
+uv run --frozen python -m consistency_worker maintain &
+pids+=("$!")
 uv run --frozen python -m consistency_worker &
 pids+=("$!")
 npm --prefix apps/web run dev -- --port "$WEB_PORT" &

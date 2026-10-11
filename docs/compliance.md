@@ -69,7 +69,9 @@ is true only for `synthetic` and `replay`. A third-party source persists raw row
 they are stored so a result can be audited. Checkpoints embed books and follow the same raw-data
 gate.
 
-The cleanup job (`RETENTION_INTERVAL_S`, default one hour) applies `RetentionPolicy`:
+The maintenance process (`python -m consistency_worker maintain`, interval
+`RETENTION_INTERVAL_S`, default one hour) applies `RetentionPolicy`. The worker
+entrypoint starts it and leaves it running after ingestion finishes:
 
 - Sessions labeled `synthetic:inconsistent` or `replay:inconsistent` are pinned. Their snapshots,
   deltas, and checkpoints are kept so the bundled demo can be reconstructed exactly.

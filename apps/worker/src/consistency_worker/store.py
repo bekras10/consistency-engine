@@ -52,6 +52,7 @@ class DatabaseSessionStore:
             persist_raw=settings.raw_market_data_persisted,
             pinned=inputs.source_label in _DEMO_LABELS,
             batch_size=settings.journal_batch_size,
+            reseed=settings.reseed_session,
             config_document={
                 "fingerprint": inputs.fingerprint,
                 "source": inputs.source_label,
@@ -68,6 +69,7 @@ class DatabaseSessionStore:
             checkpoints=opened.checkpoints,
             sink=opened.sink,
             resume_from=opened.resume_from,
+            skip_ingest=opened.skip_ingest,
         )
 
     async def close_session(

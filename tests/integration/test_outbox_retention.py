@@ -10,6 +10,7 @@ from sqlalchemy import text
 from consistency_persistence.db import make_engine, make_sessionmaker
 from consistency_persistence.outbox import (
     CLAIM_PAGE_SIZE,
+    _lock_prune,
     committed_notifications,
     prune_consumed_outbox,
     pruned_through,
@@ -105,9 +106,9 @@ async def test_prune_stops_at_the_watermark_and_does_not_skip(db: str) -> None:
 async def test_overlapping_prunes_keep_a_monotonic_floor(db: str) -> None:
     """Two prunes in flight must not move the stored floor backward.
 
-    The higher watermark commits first. Without a lock the slower, lower
-    prune still writes the floor it read at the start. Ids above the
-    commit-safe watermark stay.
+    The higher watermark holds the retention lock until the lower prune is
+    blocked on that same lock, then commits. The lower call re-reads the
+    floor and must return it. Ids above the commit-safe watermark stay.
     """
     total = 40
     high = 30
@@ -115,9 +116,18 @@ async def test_overlapping_prunes_keep_a_monotonic_floor(db: str) -> None:
     await _seed(db, total)
     engine = make_engine(db)
     maker = make_sessionmaker(engine)
+    high_holds = asyncio.Event()
+    low_waiting = asyncio.Event()
 
     async def prune_to(consumed: int) -> int:
         async with maker() as session, session.begin():
+            if consumed == high:
+                await _lock_prune(session)
+                high_holds.set()
+                await low_waiting.wait()
+            else:
+                await high_holds.wait()
+                low_waiting.set()
             return await prune_consumed_outbox(session, consumed)
 
     try:

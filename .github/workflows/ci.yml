@@ -99,7 +99,9 @@ jobs:
         run: npm test
       - name: npm audit
         working-directory: .
-        run: node scripts/check_npm_audit.mjs
+        run: |
+          node --test scripts/npm_audit_lib.test.mjs
+          node scripts/check_npm_audit.mjs
 
   e2e:
     runs-on: ubuntu-latest
@@ -144,3 +146,11 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Playwright
         run: bash scripts/e2e.sh
+
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compose smoke
+        run: bash scripts/compose_smoke.sh
