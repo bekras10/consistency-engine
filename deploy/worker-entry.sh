@@ -5,6 +5,13 @@
 # A signal stops both and exits 0. There is no sleeping shell that leaves
 # retention unscheduled.
 set -eu
+# The compose healthcheck is a separate process. It sees these variables from
+# the container environment (docker-compose.yml sets the same defaults). A
+# missing or old heartbeat is unhealthy while this script expects maintenance.
+export EXPECT_MAINTENANCE="${EXPECT_MAINTENANCE:-1}"
+export MAINTENANCE_HEARTBEAT_PATH="${MAINTENANCE_HEARTBEAT_PATH:-/tmp/consistency-worker/heartbeat}"
+export MAINTENANCE_STALE_S="${MAINTENANCE_STALE_S:-30}"
+export MAINTENANCE_HEARTBEAT_S="${MAINTENANCE_HEARTBEAT_S:-5}"
 maint=0
 child=0
 stop=0

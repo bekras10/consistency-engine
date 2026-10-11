@@ -801,3 +801,26 @@ https://github.com/bekras10/consistency-engine/actions/runs/38171909104 finished
 Retry commit `1b290a9` was pushed. GitHub Actions run
 https://github.com/bekras10/consistency-engine/actions/runs/38172269931 finished with conclusion `success`. Jobs: backend, frontend, e2e, and compose.
 
+## Audit fixes before Phase 17 — 2026-10-11
+
+Regression tests were added first and failed, then the code was fixed. Golden expected values in `fixtures/golden` and `tests/golden` were not edited. No Kalshi endpoint was called. Nothing was deployed. Phase 17 was not in this commit.
+
+| Issue | Regression | Pre-fix failure | Design |
+|---|---|---|---|
+| Host database published on every interface | `test_host_database_publishes_only_on_loopback` | `host_ip` was missing (`None`), which publishes `0.0.0.0` | `compose.host-db.yml` publishes `127.0.0.1:${POSTGRES_PORT}:5432`. `docker-compose.yml` still has no database ports (`test_production_compose_does_not_publish_postgres`) |
+| Next dev listened beyond loopback | `test_dev_script_binds_next_to_loopback` | `scripts/dev.sh` had neither `--hostname 127.0.0.1` nor `-H 127.0.0.1` | `make dev` passes `--hostname 127.0.0.1` to `next dev` |
+| Latest completed session lost to an older resumable row | `test_later_completed_session_is_not_replaced_by_an_older_interrupted_one` | `skip_ingest` was `False`. Startup resumed `ses-precedence`, the older interrupted id | The latest row for the fingerprint decides, ordered by `started_at` then `session_id`. A later `completed` row skips ingest. A later `failed` or `interrupted` reseed is resumed and does not open a third id. `reseed` still allocates a new id when the latest row is completed |
+| Completed session hid a dead maintenance process | `test_completed_session_with_stale_maintenance_is_unhealthy` | `assert ('completed', 0) == ('unhealthy', 1)` | `maintain` rewrites a heartbeat file every 5 seconds. With `EXPECT_MAINTENANCE=1`, health exits 1 `unhealthy` if that file is missing or older than 30 seconds. A `failed` ingestion session still prints `failed` and exits 1. A completed session with a fresh heartbeat stays `completed` / 0 |
+
+`test_completed_only_fingerprint_skips_ingest`, `test_interrupted_only_fingerprint_resumes`, `test_completed_then_failed_reseed_resumes_without_a_third_id`, and `test_explicit_reseed_when_the_latest_is_completed_opens_a_new_session` passed on the pre-fix code as well. The bug was the opposite order: any resumable row won over a later completed row. `test_completed_session_with_fresh_maintenance_is_healthy` and `test_failed_ingestion_is_unhealthy_even_with_fresh_maintenance` also passed before the heartbeat check, because `completed` was already exit 0 and `failed` was already exit 1.
+
+`scripts/compose_smoke.sh` now GETs the containerized dashboard and requires the synthetic-simulation label plus a detection id read from Postgres, then posts replay start through `/app-data` with a capability cookie and requires a non-error body that contains that session id.
+
+The host-test container `consistency-engine-db-1` was recreated from `compose.host-db.yml` with `POSTGRES_PORT=5433`. Inspect shows `127.0.0.1:5433->5432/tcp`. PostgreSQL 17 on port 5432 was not modified. `consistency-deploy` was left running.
+
+Local verification, Docker Postgres 16.15 on `127.0.0.1:5433`: `make lint` clean, `make typecheck` clean (89 source files). `make test` 489 passed in 142.92s. Suites: unit 366, golden 34, property 24, replay 14, integration 51. Frontend: eslint clean, `tsc --noEmit` clean, Vitest 21 passed (6 files), `next build` succeeded (Next.js 15.5.27). `node --test scripts/npm_audit_lib.test.mjs` 4 passed. `node scripts/check_npm_audit.mjs` printed production vulnerability count 0 and the two allowlisted ids `GHSA-vfj7-8cjw-p6xm` and `GHSA-rj75-hqrm-r3gf`. `scripts/e2e.sh` with `E2E_SKIP_COMPOSE=1`, `POSTGRES_PORT=5433`, and `WEB_PORT=3001` printed `Replay proxy: 401 without a token; viewers viewer-8724b75b701a48b8be70829a0420e604 and viewer-2683bc242b63479289ef5453b842a1fc seek to cursors 0 and 12277.`, then Playwright `e2e/dashboard.spec.ts` 1 passed (28.5s) and `e2e/disconnected.spec.ts` 1 passed (457ms), then `Playwright passed, including the disconnected page.`
+
+`bash scripts/compose_smoke.sh` on project `consistency-smoke-local-56362` printed `dashboard HTML contains the synthetic label and det-95059b7de19069c3e51aed0f`, then `replay start referenced ses-6d5d6194d5ee6eead3895a26`, then `compose smoke passed: 12 detections, 1 completed session, restart kept the same ids, frontend replay referenced ses-6d5d6194d5ee6eead3895a26`, and exited 0. The project was removed by the script. Postgres was not published.
+
+The inconsistency-workload end-to-end median of 2281.125 ms was not remeasured.
+

@@ -1,10 +1,13 @@
 """Session lifecycle on top of the shared repository.
 
-Deterministic sessions left ``running``, ``interrupted``, or ``failed`` resume from the latest
-checkpoint: the journal is truncated after that ordinal, and detections that were written past
-it are removed so replay cannot duplicate or orphan them. A deterministic fingerprint that
-already has a ``completed`` session is not ingested again unless ``reseed`` is set. A
-non-deterministic session is not resumed; a new session id is allocated.
+Deterministic sessions resume from the latest checkpoint when the latest row for that
+fingerprint is ``running``, ``interrupted``, or ``failed``: the journal is truncated after
+that ordinal, and detections written past it are removed so replay cannot duplicate or
+orphan them. The latest row decides. A later failed or interrupted reseed is resumed even
+when an older row completed, and that resume does not allocate another id. A later
+``completed`` row is not ingested again unless ``reseed`` is set; an older interrupted row
+does not override it. A non-deterministic session is not resumed; a new session id is
+allocated.
 """
 
 from __future__ import annotations
@@ -348,8 +351,15 @@ async def _allocate(
 ) -> tuple[str, Checkpoint | None, bool]:
     """Return ``(session_id, checkpoint, skip_ingest)``.
 
-    ``skip_ingest`` is true when this deterministic fingerprint already completed and
-    ``reseed`` is false. The caller must not append journal rows or detections.
+    The latest row for a deterministic fingerprint decides. Rows are ordered by
+    ``started_at``, then ``session_id``.
+
+    * Latest ``running``, ``interrupted``, or ``failed``: resume that id. An
+      older ``completed`` row does not hide a later reseed that failed, and
+      startup does not allocate a third id.
+    * Latest ``completed``: ``skip_ingest`` is true. An older interrupted row
+      does not reopen the fingerprint. The caller must not append journal rows.
+    * ``reseed`` true: allocate a new id even when the latest row completed.
     """
     if deterministic and not reseed:
         rows = list(
@@ -361,9 +371,9 @@ async def _allocate(
                 )
             ).scalars()
         )
-        resumable = [row for row in rows if row.status in _RESUMABLE]
-        if resumable:
-            existing = resumable[-1]
+        latest = rows[-1] if rows else None
+        if latest is not None and latest.status in _RESUMABLE:
+            existing = latest
             resume = await latest_checkpoint(session, existing.session_id)
             if resume is None:
                 await _wipe_runtime(session, existing.session_id)

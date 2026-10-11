@@ -39,7 +39,9 @@ docker compose -p consistency-deploy up --build
 `docker-compose.yml` sets the project name `consistency-deploy`. That project
 does not replace the host-test database container `consistency-engine-db-1`.
 Host tests use `compose.host-db.yml` with project `consistency-engine` and
-`POSTGRES_PORT` (5433 on this machine).
+`POSTGRES_PORT` (5433 on this machine). That file publishes Postgres on
+`127.0.0.1` only. `scripts/dev.sh` starts Next.js with `--hostname 127.0.0.1`.
+The production compose file does not publish Postgres.
 
 The `migrate` container runs `alembic upgrade head` and exits. The API
 entrypoint runs the same upgrade again, then execs uvicorn so SIGTERM reaches
@@ -47,15 +49,19 @@ the server. The worker entrypoint starts two processes:
 `python -m consistency_worker maintain` and `python -m consistency_worker`.
 Maintenance applies retention on `RETENTION_INTERVAL_S` and keeps running after
 ingestion finishes. The ingestion process stays up after a terminal session
-until SIGTERM. On startup, if this fingerprint already has a completed
-ingestion session, it does not ingest again. A `running`, `interrupted`, or
-`failed` session resumes from its checkpoint. `RESEED_SESSION=true` or
-`python -m consistency_worker run --reseed` allocates a new session. The
+until SIGTERM. The latest ingestion session for a fingerprint decides.
+Ordinary startup resumes a `running`, `interrupted`, or `failed` session
+from its checkpoint, including a later failed or interrupted reseed that
+follows an older completed session. That resume keeps the reseed id and
+does not open another one. If the latest session is `completed`, startup
+skips ingest. An older interrupted row does not override that completed
+session. `RESEED_SESSION=true` or `python -m consistency_worker run --reseed`
+allocates a new session when the latest one is already completed. The
 default is false. `stop_grace_period` is 30s on the worker and 20s on the
 API. Restart policy is `unless-stopped` except for the one-shot migrate
 container. If either worker process exits on its own, the entrypoint exits
-non-zero so both come back together. A completed fingerprint is not opened
-twice by that restart.
+non-zero so both come back together. A fingerprint whose latest session
+completed is not opened twice by that restart.
 
 Compose sets `DATA_SOURCE=synthetic`, `SYNTHETIC_PRESET=inconsistent`, and
 `SYNTHETIC_PLAYBACK_SPEED=10`. Allowed playback speeds are 0.5, 1, 2, 5, and
@@ -102,21 +108,34 @@ here.
 ## Worker health
 
 `python -m consistency_worker health` is the compose healthcheck. It reads the
-latest ingestion session. It does not treat a successful PostgreSQL ping as
-enough.
+latest ingestion session and, when the entrypoint expects maintenance, the
+heartbeat file the maintenance process rewrites. It does not treat a
+successful PostgreSQL ping, or a historical `completed` row, as proof that
+the maintenance process is alive.
+
+The worker service sets `EXPECT_MAINTENANCE=1`. `maintain` writes
+`MAINTENANCE_HEARTBEAT_PATH` (default `/tmp/consistency-worker/heartbeat`)
+every `MAINTENANCE_HEARTBEAT_S` seconds (default 5). If that file is missing
+or older than `MAINTENANCE_STALE_S` (default 30), health prints `unhealthy`
+and exits 1 even when the last ingestion session is `completed`. A host
+`health` command that leaves `EXPECT_MAINTENANCE` unset does not require the
+file. A `failed` ingestion session exits 1 either way. A fresh heartbeat
+does not turn a failed session into a healthy one.
 
 | Status | Printed word | Exit | Meaning |
 |---|---|---|---|
-| `running` | `running` | 0 | Ingestion is in progress |
-| `completed` | `completed` | 0 | The deterministic session finished. This is an expected terminal state |
-| `interrupted` | `interrupted` | 0 | The journal stopped early. The next start resumes it |
+| `running`, heartbeat fresh or not required | `running` | 0 | Ingestion is in progress |
+| `completed`, heartbeat fresh or not required | `completed` | 0 | The deterministic session finished. This is an expected terminal state |
+| `interrupted`, heartbeat fresh or not required | `interrupted` | 0 | The journal stopped early. The next start resumes it |
+| `completed` or `running`, maintenance stale | `unhealthy` | 1 | The entrypoint expects maintenance, and the heartbeat is missing or old |
 | `failed` | `failed` | 1 | Processing failed. The container is unhealthy |
 | no row yet | `starting` | 1 | The session has not been opened |
 | database error | `unhealthy` | 1 | The status could not be read |
 
-A completed demo stays healthy. Failed processing does not. `running` and
-`completed` share exit 0 so Compose can mark both healthy; the printed word
-distinguishes them.
+A completed demo with a live maintenance process stays healthy. A dead or
+wedged maintenance process does not, and neither does failed processing.
+`running` and `completed` share exit 0 when maintenance is fresh so Compose
+can mark both healthy; the printed word distinguishes them.
 
 ## CI
 
@@ -124,8 +143,11 @@ GitHub Actions runs the host test suites and `scripts/compose_smoke.sh`. That
 job builds these images, starts a fresh database on the compose network
 without publishing Postgres, waits until the synthetic worker has written
 detections, calls `GET /api/v1/detections`, restarts the worker and the API,
-and checks the detection ids are unchanged. It tears down only its own
-project. The local command that builds and starts the stack on a machine is
+and checks the detection ids are unchanged. It then GETs the containerized
+dashboard and checks the HTML for the synthetic-simulation label and a
+detection id read from Postgres, and posts replay start through the
+frontend `/app-data` proxy with a capability cookie. It tears down only its
+own project. The local command that builds and starts the stack on a machine is
 still:
 
 ```bash

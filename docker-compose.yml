@@ -91,6 +91,13 @@ services:
     entrypoint: ["/app/deploy/worker-entry.sh"]
     environment:
       <<: *python-env
+      # Health exits 1 when this file is older than MAINTENANCE_STALE_S, even
+      # if the last ingestion session is completed. The maintain process
+      # rewrites it every MAINTENANCE_HEARTBEAT_S.
+      EXPECT_MAINTENANCE: "1"
+      MAINTENANCE_HEARTBEAT_PATH: /tmp/consistency-worker/heartbeat
+      MAINTENANCE_STALE_S: "30"
+      MAINTENANCE_HEARTBEAT_S: "5"
     depends_on:
       migrate:
         condition: service_completed_successfully

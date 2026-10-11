@@ -6,10 +6,12 @@ Session outcomes:
   past the restart budget: every open detection is closed (``SESSION_ENDED``), a final
   checkpoint is written and the session is marked ``completed`` / ``failed``;
 * deterministic source stopped (signal) or crashed: the session stays ``interrupted``; the next
-  start with the same input fingerprint resumes from its latest checkpoint (the store discards
-  everything recorded after it), which yields exactly the uninterrupted result. A ``failed``
-  session resumes the same way. A fingerprint that already ``completed`` is not ingested again
-  unless ``RESEED_SESSION`` is set;
+  start with the same input fingerprint resumes from its latest checkpoint when that
+  fingerprint's latest session is resumable (the store discards everything recorded after
+  it), which yields exactly the uninterrupted result. A later ``failed`` or ``interrupted``
+  reseed is resumed even if an older session ``completed``, and that resume keeps the reseed
+  id. If the latest session ``completed``, it is not ingested again unless ``RESEED_SESSION``
+  is set;
 * live source stopped: open detections are closed and the session is ``stopped``. A live session
   is not resumed. Startup allocates a new session id.
 """

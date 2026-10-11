@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Build the deployment images, start a fresh database on an internal network,
-# and check the synthetic worker. Postgres is not published. The project name
-# is not consistency-deploy or consistency-engine, and teardown removes only
-# this project.
+# and check the synthetic worker and the containerized frontend. Postgres is
+# not published. The project name is not consistency-deploy or
+# consistency-engine, and teardown removes only this project.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -154,4 +154,75 @@ if [[ "$after_api" != "$detections" ]]; then
   exit 1
 fi
 
-echo "compose smoke passed: ${detections} detections, 1 completed session, restart kept the same ids"
+wait_frontend() {
+  local i
+  for i in $(seq 1 40); do
+    if curl -sf "http://127.0.0.1:${WEB_PORT}/" >/dev/null; then
+      return 0
+    fi
+    sleep 3
+  done
+  echo "frontend did not serve the dashboard" >&2
+  docker compose -p "$project" "${files[@]}" logs frontend >&2 || true
+  return 1
+}
+
+wait_frontend
+html="$(mktemp)"
+cookie="$(mktemp)"
+replay_body="$(mktemp)"
+cleanup_http() {
+  rm -f "$html" "$cookie" "$replay_body"
+}
+trap 'cleanup_http; cleanup' EXIT
+
+curl -sf "http://127.0.0.1:${WEB_PORT}/" -o "$html"
+detection_id="$(psql_at "SELECT detection_id FROM detections ORDER BY last_observed_ms DESC LIMIT 1")"
+detection_id="$(printf '%s' "$detection_id" | tr -d '[:space:]')"
+session_id="$(psql_at "SELECT session_id FROM ingestion_sessions WHERE status = 'completed' ORDER BY started_at DESC LIMIT 1")"
+session_id="$(printf '%s' "$session_id" | tr -d '[:space:]')"
+if [[ -z "$detection_id" || -z "$session_id" ]]; then
+  echo "database did not return a detection id and a completed session" >&2
+  exit 1
+fi
+python3 - "$html" "$detection_id" <<'PY'
+import pathlib, sys
+html = pathlib.Path(sys.argv[1]).read_text()
+detection_id = sys.argv[2]
+if "Synthetic simulation" not in html:
+    sys.exit("dashboard HTML is missing the synthetic-simulation label")
+if detection_id not in html:
+    sys.exit(f"dashboard HTML is missing detection {detection_id} from Postgres")
+print(f"dashboard HTML contains the synthetic label and {detection_id}")
+PY
+
+cap_code="$(curl -sS -o /dev/null -w '%{http_code}' -c "$cookie" -X POST \
+  "http://127.0.0.1:${WEB_PORT}/app-data/replay-capability")"
+if [[ "$cap_code" != "200" ]]; then
+  echo "replay capability returned ${cap_code}" >&2
+  exit 1
+fi
+replay_code="$(curl -sS -o "$replay_body" -w '%{http_code}' -b "$cookie" \
+  -H 'content-type: application/json' \
+  -X POST \
+  --max-time 180 \
+  -d '{}' \
+  "http://127.0.0.1:${WEB_PORT}/app-data/replay/${session_id}/start")"
+python3 - "$replay_body" "$replay_code" "$session_id" <<'PY'
+import json, pathlib, sys
+body_path, code, session_id = sys.argv[1:]
+raw = pathlib.Path(body_path).read_text()
+if not code.startswith("2"):
+    sys.exit(f"replay start returned {code}: {raw[:400]}")
+try:
+    body = json.loads(raw)
+except json.JSONDecodeError as exc:
+    sys.exit(f"replay start was not JSON: {exc}")
+if body.get("ok") is not True or "error" in body:
+    sys.exit(f"replay start was an error: {raw[:400]}")
+if session_id not in raw:
+    sys.exit(f"replay start did not reference session {session_id}")
+print(f"replay start referenced {session_id}")
+PY
+
+echo "compose smoke passed: ${detections} detections, 1 completed session, restart kept the same ids, frontend replay referenced ${session_id}"

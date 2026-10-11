@@ -3,13 +3,18 @@
 ``run`` (default) starts detection for the configured data source (``DATA_SOURCE``,
 default ``synthetic``). After a terminal session (``completed`` or ``failed``) the
 process stays up until SIGINT / SIGTERM so a supervisor does not open another
-ingestion. A fingerprint that already completed is not ingested again unless
-``--reseed`` or ``RESEED_SESSION=true``.
+ingestion. The latest session for a fingerprint decides. A later failed or
+interrupted reseed is resumed. A latest completed session is not ingested
+again unless ``--reseed`` or ``RESEED_SESSION=true``.
 
-``maintain`` runs retention until signaled. It does not ingest.
+``maintain`` runs retention until signaled and rewrites a heartbeat file on a
+short interval. It does not ingest.
 
 ``health`` prints the latest ingestion status and exits 0 for ``running``,
-``completed``, and ``interrupted``. ``failed`` exits 1.
+``completed``, and ``interrupted`` when maintenance is fresh or not required.
+``failed`` exits 1. A stale maintenance heartbeat exits 1 with ``unhealthy``
+even if the last ingestion session completed. ``EXPECT_MAINTENANCE=1`` is what
+turns that check on.
 
 Exit status of ``run``: 0 on completion, idle stop, or graceful interrupt; 1 is not
 used after a clean failed session because the process stays up for the healthcheck
@@ -28,7 +33,12 @@ import sys
 from consistency_connectors.settings import ConfigurationError, Settings
 from consistency_connectors.sources.kalshi import KalshiAccessRefusedError
 from consistency_worker import logs
-from consistency_worker.health import report_health
+from consistency_worker.health import (
+    heartbeat_interval_s,
+    heartbeat_path,
+    report_health,
+    write_heartbeat,
+)
 from consistency_worker.service import SessionStore, WorkerService
 from consistency_worker.store import DatabaseSessionStore
 
@@ -75,6 +85,26 @@ async def _run(settings: Settings) -> int:
             await close()
 
 
+async def _pulse(stop: asyncio.Event) -> None:
+    """Rewrite the maintenance heartbeat until ``stop`` is set.
+
+    Retention may sleep for an hour. The heartbeat interval is short so a
+    wedged maintenance process becomes stale while this task is still alive.
+    """
+    path = heartbeat_path()
+    interval = heartbeat_interval_s()
+    while True:
+        try:
+            write_heartbeat(path)
+        except OSError:
+            log.warning("maintenance heartbeat was not written", extra={"path": str(path)})
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+        except TimeoutError:
+            continue
+        return
+
+
 async def _maintain(settings: Settings) -> int:
     if not settings.database_url:
         log.error("DATABASE_URL is required for maintenance")
@@ -88,10 +118,12 @@ async def _maintain(settings: Settings) -> int:
         await store.aclose()
         log.error("database unreachable", extra={"error": type(exc).__name__})
         return 2
+    pulse = asyncio.create_task(_pulse(stop), name="maintenance-heartbeat")
     task = asyncio.create_task(store.retention_loop(), name="retention")
     await stop.wait()
+    pulse.cancel()
     task.cancel()
-    await asyncio.gather(task, return_exceptions=True)
+    await asyncio.gather(pulse, task, return_exceptions=True)
     await store.aclose()
     return 0
 

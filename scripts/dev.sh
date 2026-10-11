@@ -51,7 +51,7 @@ uv run --frozen python -m consistency_worker maintain &
 pids+=("$!")
 uv run --frozen python -m consistency_worker &
 pids+=("$!")
-npm --prefix apps/web run dev -- --port "$WEB_PORT" &
+npm --prefix apps/web run dev -- --hostname 127.0.0.1 --port "$WEB_PORT" &
 pids+=("$!")
 
 gateway_ok=0

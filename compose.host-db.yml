@@ -10,7 +10,9 @@ services:
       POSTGRES_PASSWORD: consistency
       POSTGRES_DB: consistency
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # Host tests only. Loopback, not 0.0.0.0. The production compose file
+      # does not publish this port at all.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:

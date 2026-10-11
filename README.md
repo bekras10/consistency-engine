@@ -127,9 +127,11 @@ An unchanged quote does not emit another event.
 `DATA_SOURCE` defaults to `synthetic`. The bundled inconsistent preset is a fixed
 recording (seed, relationships, and fee versions included in the session fingerprint).
 Playback speed changes only the sleep between messages. It does not change the
-fingerprint. A completed fingerprint is not ingested again on restart. A session left
-`running`, `interrupted`, or `failed` resumes from its checkpoint. `RESEED_SESSION=true`
-or `python -m consistency_worker run --reseed` opens a new session. The default is off.
+fingerprint. The latest session for that fingerprint decides. A completed
+session is not ingested again. A later failed or interrupted reseed is resumed
+and does not open another id. `RESEED_SESSION=true` or
+`python -m consistency_worker run --reseed` opens a new session when the latest
+one already completed. The default is off.
 
 `DATA_SOURCE=replay` reads a recorded journal. Opening a session stores
 content-addressed market, relationship, and fee snapshots, and replay loads those
@@ -161,9 +163,10 @@ the dashboard gateway, and Next.js. The dashboard is `http://127.0.0.1:3000`. It
 The public stream is `GET /api/v1/stream` on the API process, which `make dev` does not
 publish; the compose stack below runs that API.
 
-The host database publishes `${POSTGRES_PORT:-5432}`. If port 5432 is already in use,
-set `POSTGRES_PORT` and `DATABASE_URL` before `make dev`. This machine's host-test
-database is on port 5433. Do not point that URL at a different PostgreSQL on 5432.
+The host database publishes `127.0.0.1:${POSTGRES_PORT:-5432}` only. If port
+5432 is already in use, set `POSTGRES_PORT` and `DATABASE_URL` before `make dev`.
+This machine's host-test database is on port 5433. Do not point that URL at a
+different PostgreSQL on 5432. `make dev` binds Next.js to `127.0.0.1`.
 
 The Compose stack uses its own volume and does not publish Postgres:
 
