@@ -9,7 +9,7 @@ PYTEST := $(UV) run --frozen pytest
 export PYTHONPATH := packages/core/src:packages/simulation/src:packages/connectors/src:packages/pipeline/src:packages/persistence/src:apps/api/src:apps/worker/src$(if $(PYTHONPATH),:$(PYTHONPATH),)
 
 .PHONY: help setup dev test test-unit test-property test-golden lint format typecheck build \
-        seed datasets replay benchmark api clean e2e
+        seed datasets replay benchmark api clean e2e demo
 
 help:
 	@echo "setup      install Python workspace (uv sync)"
@@ -25,6 +25,7 @@ help:
 	@echo "dev        Postgres, migrations, synthetic worker, gateway, and Next.js"
 	@echo "build      production build of the Next.js dashboard"
 	@echo "benchmark  synthetic workloads; DATABASE_URL on port 5433 (5432 needs BENCHMARK_ALLOW_PORT_5432=1)"
+	@echo "demo       print the synthetic Compose detection path (project consistency-deploy)"
 
 setup:
 	$(UV) sync
@@ -77,6 +78,9 @@ build:
 
 e2e:
 	bash scripts/e2e.sh
+
+demo:
+	bash scripts/demo.sh
 
 replay:
 	$(PY) scripts/replay_session.py

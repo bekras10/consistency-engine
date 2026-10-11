@@ -18,9 +18,11 @@ not a measurement of a live market.
 This is an independent open-source project. It is not an official Kalshi product and
 it is not endorsed by Kalshi.
 
-Screenshots are not included yet. The demonstration sequence is a later phase and has
-not been recorded. Start the synthetic dashboard with the commands in
-[Getting started](#getting-started) and open `http://127.0.0.1:3000`.
+![Synthetic overview of the Compose dashboard](docs/demo/overview.png)
+
+The image is the Compose dashboard at `http://127.0.0.1:3000` after `make demo`.
+The yellow banner is the synthetic-simulation label. The click path, the stored
+fee arithmetic, and the 22-second recording are in [docs/demo.md](docs/demo.md).
 
 ## Architecture
 
@@ -179,6 +181,10 @@ compose networks. Stop that project with `docker compose -p consistency-deploy d
 That command does not remove the host-test database. Worker health, reseed, and
 retention are specified in [docs/deployment.md](docs/deployment.md).
 
+`make demo` starts that Compose project if the dashboard is not already up, waits
+for the completed synthetic session, and prints the detection id it read from
+Postgres. The path is `http://127.0.0.1:3000/detections/<id>`.
+
 ## Tests
 
 Python, with `DATABASE_URL` set to the host Postgres (port 5432, or 5433 when that
@@ -312,6 +318,21 @@ above, not the sub-millisecond pricing timer.
 The same list, with the gates that implement it:
 [docs/limitations.md](docs/limitations.md).
 
+## Roadmap
+
+Not in the current tree:
+
+- The Kalshi adapter stays off unless `ENABLE_KALSHI_API` and
+  `KALSHI_AUTHORIZATION_CONFIRMED` are both set. Using it would be a separate
+  authorized read-only step.
+- The dashboard polls `/app-data`. `GET /api/v1/stream` is implemented and is not
+  what the pages subscribe to.
+- A replay viewer cursor is stored in the gateway process. Another process does
+  not see it.
+- Moving the frontend to Tailwind 4 would remove the two allowlisted development
+  advisories, `GHSA-vfj7-8cjw-p6xm` (braces) and `GHSA-rj75-hqrm-r3gf`
+  (postcss-selector-parser). The production audit count is 0.
+
 ## Documentation
 
 - [Architecture](docs/architecture.md)
@@ -324,3 +345,4 @@ The same list, with the gates that implement it:
 - [Limitations](docs/limitations.md)
 - [Data contracts](docs/data-contracts.md)
 - [Progress](PROGRESS.md)
+- [Demonstration](docs/demo.md)

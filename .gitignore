@@ -32,3 +32,6 @@ apps/web/out/
 .DS_Store
 .idea/
 .vscode/
+
+# Playwright scratch output from scripts/record_demo.mjs
+docs/demo/.video/

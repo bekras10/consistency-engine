@@ -824,3 +824,35 @@ Local verification, Docker Postgres 16.15 on `127.0.0.1:5433`: `make lint` clean
 
 The inconsistency-workload end-to-end median of 2281.125 ms was not remeasured.
 
+Commit `fb739b3` was pushed. GitHub Actions run
+https://github.com/bekras10/consistency-engine/actions/runs/38174464108 finished
+with conclusion `success`. Jobs included backend, frontend, e2e, and compose.
+The compose job was not rate-limited.
+
+## Phase 17 — demonstration — 2026-10-11
+
+`make demo` (`scripts/demo.sh`) starts Compose project `consistency-deploy` when
+the dashboard is down, waits for the synthetic label, and prints the implication
+`FEE_ADJUSTED_CANDIDATE` it read from Postgres. On the running volume that id was
+`det-f26eee89fc522826ab5d90f1`, relationship `rel-32e08488281acae6`, session
+`ses-6d5d6194d5ee6eead3895a26`. The script then required the detection page to
+contain the stored certificate hash, gross edge `8.4180`, fees `0.958000`, net
+edge `7.460000`, minimum payoff per unit `1`, and classification
+`FEE_ADJUSTED_CANDIDATE`. It printed `page matches the stored detection row and
+certificate payoff`.
+
+The closing certificate classification is `INSUFFICIENT_LIQUIDITY`, with
+`fees` JSON null and `validation.first_failing_gate` `markets_open_with_asks`.
+The row's worst-case payoff is `153`, equal to depth quantity `153` times
+certificate `min_payoff_per_unit` `"1"`. The click path and that comparison are
+in `docs/demo.md`.
+
+The UI was recorded with Playwright against `http://127.0.0.1:3000` and ffmpeg.
+`docs/demo/demo.webm` is 21.76 seconds. `docs/demo/demo.gif` is the same take.
+Screenshots: `overview.png`, `relationship.png`, `detection-fees.png`,
+`detection.png`, `replay.png`. Replay in that take is `paused`, cursor `28/12277`.
+
+Phases 18–20 were not started. Nothing was deployed to a public host. The
+2281.125 ms end-to-end median was not remeasured. Golden expected values were
+not edited.
+
