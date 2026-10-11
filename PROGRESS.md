@@ -860,3 +860,84 @@ Commit `68c3e78` was pushed. GitHub Actions run
 https://github.com/bekras10/consistency-engine/actions/runs/38175299836 finished
 with conclusion `success`. Jobs: backend, frontend, e2e, and compose.
 
+## Phase 17 repair — certificate integrity and the qualifying cursor — 2026-10-11
+
+The first demonstration stored the qualifying certificate hash beside the later
+closing certificate. `engine._close` already kept the qualifying hash and quote.
+`recording.py` replaced `certificate_json` and the projected legs from
+`ev.evaluation` whenever the close carried an evaluation. A row could name a
+fee-adjusted proof and store an `INSUFFICIENT_LIQUIDITY` document.
+
+The regression was written first.
+`test_close_keeps_qualifying_certificate_and_stores_the_close` failed on the
+unfixed writer for `EXPIRED`, `RESOLVED`, and `INVALIDATED`:
+`row.certificate_json` was the closing document while `certificate_hash` stayed
+the qualifying hash. After the fix, SHA-256 of the stored qualifying JSON
+equals `certificate_hash`, and the close is stored in
+`closing_classification`, `closing_certificate_hash`, and
+`closing_certificate_json` (Alembic `0005_closing_certificate`, downgraded to
+`0004_outbox_retention` and upgraded back to head). Checkpoint restore keeps
+that split (`test_checkpoint_restore_keeps_qualifying_proof_and_close_reason`).
+Open and update rows are checked by
+`test_opened_and_updated_certificates_match_their_hashes`.
+
+The detection page labels a closed row **Last qualifying quote** and says it is
+not a currently executable opportunity. **Closing condition** shows the later
+classification and its own hash. Replay can seek a journal prefix
+(`seek_cursor`) so a qualifying sample and a close that share a millisecond
+stay distinct. Playback rebuilds books with the recording's source label, so
+the recomputed certificate matches the stored proof.
+`test_replay_pins_recorded_reference_versions` compared that playback with an
+in-memory apply that still used source `replay`; both sides now use the
+recorded source. The pin assertion is unchanged.
+
+The selected synthetic detection is still `det-f26eee89fc522826ab5d90f1`.
+The qualifying state is journal ordinal `980`, pipeline timestamp
+`1784124010025`, replay cursor `981/12277`. Cursor `982` is the close
+(`INSUFFICIENT_LIQUIDITY`, reason `NO_ASKS`). Seeking the timestamp alone
+lands on cursor `994`, after the close. The Compose volume was rebuilt by
+worker replay (`docker compose -p consistency-deploy down -v`, then a new
+image). The certificate JSON was not hand-edited.
+
+Maintenance health now requires the retention task to be the process that
+writes the heartbeat. `retention=exited` or `retention=failed`, or a dead pid,
+is unhealthy even when the timestamp is fresh
+(`test_retention_task_exit_is_unhealthy`,
+`test_retention_task_failure_is_unhealthy`). A completed session with the
+retention task still running stays healthy
+(`test_live_maintenance_with_completed_session_stays_healthy`).
+
+`docs/demo/demo.webm` is the Playwright Chromium take of that cursor.
+`ffprobe` duration `44.760000` seconds, 4,290,463 bytes. `docs/demo/demo.gif`
+is the ffmpeg 8.1.1 palette render of that file, duration `44.840000` seconds,
+2,249,847 bytes. The take is longer than 30 seconds because Seek cursor applies
+981 journal entries before the CPI books and the certificate are on screen.
+No image model was used.
+
+Local verification, Docker Postgres 16 on `127.0.0.1:5433`: `make lint` clean,
+`make typecheck` clean (89 source files). `make test` 500 passed in 243.74s.
+Suites: unit 366, golden 34, property 24, replay 16, integration 60. Frontend:
+eslint clean, `tsc --noEmit` clean, Vitest 21 passed (6 files).
+`node --test scripts/npm_audit_lib.test.mjs` 4 passed. `scripts/e2e.sh` with
+`E2E_SKIP_COMPOSE=1`, `POSTGRES_PORT=5433`, and `WEB_PORT=3001` printed
+`Replay proxy: 401 without a token; viewers viewer-f3f4743204ba4a5f93c1d03304817730 and viewer-eb456b1088774ced88dc1d98887dab6d seek to cursors 0 and 12277.`,
+then Playwright `e2e/dashboard.spec.ts` 1 passed (40.6s) and
+`e2e/disconnected.spec.ts` 1 passed (660ms). `bash scripts/compose_smoke.sh`
+on project `consistency-smoke-local-70147` printed the qualifying certificate
+match, `replay cursor 981/12277 shows det-f26eee89fc522826ab5d90f1`, and
+`compose smoke passed: 12 detections, 1 completed session`. That project was
+removed by the script. Postgres was not published. Port 5432 was not modified.
+
+Phase 18 was not started. Nothing was deployed to a public host. The
+2281.125 ms end-to-end median was not remeasured. Golden expected values were
+not edited.
+
+Independent hash check on the rebuilt demo row
+`det-f26eee89fc522826ab5d90f1`: stored qualifying hash
+`sha256:0240383b5da7dea8aeb28ce478bd6e9655c5aa31468692fe1b938e0ebfb107fd`
+equals SHA-256 of the stored `certificate_json` (14291 bytes). Classification
+`FEE_ADJUSTED_CANDIDATE`. Closing classification `INSUFFICIENT_LIQUIDITY`.
+Stored closing hash
+`sha256:1f837ec74d44b4012131a54da84259ea3443b646334fa0b336fc967364dc1140`
+equals SHA-256 of `closing_certificate_json` (8281 bytes).
+

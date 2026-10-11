@@ -22,7 +22,7 @@ it is not endorsed by Kalshi.
 
 The image is the Compose dashboard at `http://127.0.0.1:3000` after `make demo`.
 The yellow banner is the synthetic-simulation label. The click path, the stored
-fee arithmetic, and the 22-second recording are in [docs/demo.md](docs/demo.md).
+qualifying quote, and the recording are in [docs/demo.md](docs/demo.md).
 
 ## Architecture
 
