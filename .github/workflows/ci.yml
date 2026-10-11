@@ -39,6 +39,10 @@ jobs:
           python-version: "3.12"
       - name: Install
         run: uv sync --frozen
+      - name: Python dependency audit
+        run: |
+          uv export --frozen --all-groups --no-emit-workspace -o "$RUNNER_TEMP/requirements.txt"
+          uvx pip-audit --requirement "$RUNNER_TEMP/requirements.txt" --disable-pip
       - name: Ruff lint
         run: uv run --frozen ruff check .
       - name: Ruff format
@@ -93,6 +97,9 @@ jobs:
         run: npm run typecheck
       - name: Unit tests
         run: npm test
+      - name: npm audit
+        working-directory: .
+        run: node scripts/check_npm_audit.mjs
 
   e2e:
     runs-on: ubuntu-latest

@@ -22,10 +22,12 @@ type Capability = {
 
 const capabilities = new Map<string, Capability>();
 const issuedAt: number[] = [];
+const issuedByClient = new Map<string, number[]>();
 
 export function clearCapabilities(): void {
   capabilities.clear();
   issuedAt.length = 0;
+  issuedByClient.clear();
 }
 
 export function outstandingCapabilities(): number {
@@ -54,6 +56,10 @@ export function issueLimit(): number {
   return positiveInt("REPLAY_CAPABILITY_ISSUE_LIMIT", 30);
 }
 
+export function clientIssueLimit(): number {
+  return positiveInt("REPLAY_CAPABILITY_CLIENT_LIMIT", 5);
+}
+
 export function issueWindowMs(): number {
   return positiveInt("REPLAY_CAPABILITY_ISSUE_WINDOW_S", 60) * 1000;
 }
@@ -66,11 +72,87 @@ export function pruneExpired(now = Date.now()): void {
 
 export type IssueResult = { ok: true; setCookie: string } | { ok: false; error: "rate_limited" };
 
-export function issueCapability(now = Date.now(), opts?: { secure?: boolean }): IssueResult {
+function siteKey(url: URL): string {
+  const name = url.hostname;
+  const loopback = name === "localhost" || name === "127.0.0.1" || name === "::1";
+  const host = loopback ? "loopback" : name;
+  const port = url.port || (url.protocol === "https:" ? "443" : "80");
+  return `${url.protocol}//${host}:${port}`;
+}
+
+/**
+ * Missing ``Origin`` is allowed. Non-browser clients (curl, server-side tools)
+ * do not send it. Browsers send ``Origin`` on cross-site POST. The value must
+ * match the request URL or the ``Host`` header. ``localhost`` and
+ * ``127.0.0.1`` are the same local site on the same port: Next builds
+ * ``request.url`` as ``localhost`` when the browser used ``127.0.0.1``.
+ * ``null`` and unparsable values are rejected.
+ */
+export function replayOriginAllowed(request: Request): boolean {
+  const origin = request.headers.get("origin");
+  if (origin === null || origin.trim() === "") return true;
+  if (origin.trim() === "null") return false;
+  let presented: URL;
+  try {
+    presented = new URL(origin);
+  } catch {
+    return false;
+  }
+  if (presented.protocol !== "http:" && presented.protocol !== "https:") return false;
+  if (siteKey(presented) === siteKey(new URL(request.url))) return true;
+  const host = request.headers.get("host");
+  if (!host) return false;
+  try {
+    return siteKey(presented) === siteKey(new URL(`${presented.protocol}//${host}`));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Client key for issuance throttling.
+ *
+ * Route handlers do not see the TCP peer. ``X-Forwarded-For`` is ignored unless
+ * both ``TRUSTED_PROXY_COUNT`` (>= 1) and ``TRUSTED_PROXIES`` are set. The key
+ * is then the address that many hops from the right. A direct client cannot
+ * rotate the header into a second bucket while those variables are unset.
+ * Set them only when this process is reached through that proxy, which appends
+ * the previous hop and is the only path to Next.
+ */
+export function capabilityClientKey(request: Request): string {
+  const proxies = readEnv("TRUSTED_PROXIES")
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  const rawCount = readEnv("TRUSTED_PROXY_COUNT").trim();
+  const count = Number(rawCount);
+  if (proxies.length === 0 || rawCount === "" || !Number.isFinite(count) || count < 1) {
+    return "direct";
+  }
+  const parts = (request.headers.get("x-forwarded-for") ?? "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  if (parts.length < count) return "direct";
+  return parts[parts.length - count] ?? "direct";
+}
+
+export function issueCapability(
+  now = Date.now(),
+  opts?: { secure?: boolean; client?: string },
+): IssueResult {
   pruneExpired(now);
   const windowMs = issueWindowMs();
   while (issuedAt.length > 0 && now - issuedAt[0] > windowMs) issuedAt.shift();
-  if (issuedAt.length >= issueLimit() || capabilities.size >= capabilityMax()) {
+  const client = opts?.client && opts.client.length > 0 ? opts.client : "direct";
+  const mine = issuedByClient.get(client) ?? [];
+  while (mine.length > 0 && now - mine[0] > windowMs) mine.shift();
+  if (mine.length === 0) issuedByClient.delete(client);
+  if (
+    mine.length >= clientIssueLimit() ||
+    issuedAt.length >= issueLimit() ||
+    capabilities.size >= capabilityMax()
+  ) {
     return { ok: false, error: "rate_limited" };
   }
   const id = randomBytes(32).toString("base64url");
@@ -81,6 +163,8 @@ export function issueCapability(now = Date.now(), opts?: { secure?: boolean }): 
     expiresAt: now + ttl * 1000,
   });
   issuedAt.push(now);
+  mine.push(now);
+  issuedByClient.set(client, mine);
   const flags = ["HttpOnly", "SameSite=Lax", "Path=/", `Max-Age=${ttl}`];
   if (opts?.secure) flags.splice(1, 0, "Secure");
   const setCookie = `${CAPABILITY_COOKIE}=${id}; ${flags.join("; ")}`;

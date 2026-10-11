@@ -2,6 +2,7 @@ import { gatewayBase } from "@/lib/gateway";
 import {
   authorizeReplayMutation,
   bindReplayCapability,
+  replayOriginAllowed,
 } from "@/lib/replay-capability";
 import { expectedReplayToken } from "@/lib/replay-auth";
 
@@ -17,6 +18,9 @@ async function proxy(request: Request, path: string[]): Promise<Response> {
   }
   let capabilityId: string | null = null;
   let upstreamPath = path;
+  if (isReplayMutation(request.method, path) && !replayOriginAllowed(request)) {
+    return Response.json({ error: "cross_origin" }, { status: 403 });
+  }
   if (request.method === "POST") {
     const gate = authorizeReplayMutation(request.headers.get("cookie"), path);
     if (!gate.ok) {

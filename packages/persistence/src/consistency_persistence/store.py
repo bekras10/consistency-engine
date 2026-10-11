@@ -21,6 +21,7 @@ from consistency_core.models.market import Catalog
 from consistency_core.models.relationship import Relationship
 from consistency_core.serialization import sha256_of
 from consistency_persistence.db import make_engine, make_sessionmaker
+from consistency_persistence.outbox import maintain_outbox
 from consistency_persistence.recording import (
     BatchJournal,
     CheckpointWriter,
@@ -252,6 +253,8 @@ class PersistenceStore:
             )
         if drop:
             log.info("retention stripped raw data", extra={"sessions": drop})
+        async with self.sessions() as session, session.begin():
+            await maintain_outbox(session, keep=policy.outbox_keep)
         return drop
 
     async def retention_loop(self, interval_s: int, policy: RetentionPolicy) -> None:

@@ -36,10 +36,13 @@ Delivery:
 
 Retention deletes rows and claims at or below a consumed watermark. It never
 deletes an id above that watermark, and it refuses a watermark the commit-safe
-cursor has not reached. ``outbox_retention.pruned_through`` records the floor.
+cursor has not reached. Overlapping prunes take one advisory transaction lock
+and the stored floor only moves forward (``GREATEST``).
+``outbox_retention.pruned_through`` records that floor.
 A reader whose cursor is still below that floor gets ``(True, [])`` and must
 resync. Those ids are not reported as aborted holes, so a later committed id
-is not delivered as if the pruned prefix had been skipped.
+is not delivered as if the pruned prefix had been skipped. The worker retention
+loop applies this up to ``contiguous_watermark - OUTBOX_RETENTION_KEEP``.
 """
 
 from __future__ import annotations
@@ -56,6 +59,8 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 # before the detection transaction commits, so two detections can still commit
 # out of order. It does not stay held for the life of the detection write.
 _ALLOC_LOCK = 884422331
+# Serializes retention so two prunes cannot rewind ``outbox_retention.pruned_through``.
+_PRUNE_LOCK = 884422332
 # Every claim read is a page. A short page means the scan reached the end.
 CLAIM_PAGE_SIZE = 500
 _CLAIM_PAGE_SQL = """
@@ -403,15 +408,28 @@ async def contiguous_watermark(session: AsyncSession, after_id: int) -> int:
             return cursor
 
 
+async def _lock_prune(session: AsyncSession) -> None:
+    """Hold the retention lock until this transaction ends.
+
+    ``pg_advisory_xact_lock`` is re-entered safely in the same transaction, so
+    ``maintain_outbox`` can take it and then call ``prune_consumed_outbox``.
+    """
+    await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _PRUNE_LOCK})
+
+
 async def prune_consumed_outbox(session: AsyncSession, consumed_through: int) -> int:
     """Delete outbox rows and claims at or below a consumed commit-safe watermark.
 
-    ``consumed_through`` must be between the current retention floor and
-    ``contiguous_watermark``. Ids above it stay, including their claims, so a
-    later ``pg_xact_status`` read still sees them. The sequence is not rewound.
+    Overlapping calls take ``pg_advisory_xact_lock`` and then re-read the floor,
+    so a slower prune cannot store a lower ``pruned_through``. The upsert also
+    uses ``GREATEST``. ``consumed_through`` must be between the current floor
+    and ``contiguous_watermark``. Ids above it stay, including their claims.
+    The sequence is not rewound. A caller below the floor gets the floor back
+    and deletes nothing.
     """
     if consumed_through < 0:
         raise ValueError("consumed_through must be >= 0")
+    await _lock_prune(session)
     floor = await pruned_through(session)
     if consumed_through < floor:
         return floor
@@ -432,12 +450,33 @@ async def prune_consumed_outbox(session: AsyncSession, consumed_through: int) ->
             INSERT INTO outbox_retention (singleton, pruned_through)
             VALUES (1, :consumed)
             ON CONFLICT (singleton) DO UPDATE
-            SET pruned_through = EXCLUDED.pruned_through
+            SET pruned_through = GREATEST(outbox_retention.pruned_through, EXCLUDED.pruned_through)
             """
         ),
         {"consumed": consumed_through},
     )
     return consumed_through
+
+
+async def maintain_outbox(session: AsyncSession, *, keep: int) -> int:
+    """Prune a committed prefix, leaving the newest ``keep`` ids.
+
+    The consumer watermark is ``contiguous_watermark``: the highest id a reader
+    can acknowledge without skipping a live gap. The delete target is
+    ``watermark - keep`` and is never above that watermark. A client whose
+    ``Last-Event-ID`` is still greater than the stored floor resumes those
+    rows. A cursor at or below the floor must full-resync; this function does
+    not delete detection rows, so that snapshot is still there.
+    """
+    if keep < 0:
+        raise ValueError("outbox retention keep must be >= 0")
+    await _lock_prune(session)
+    watermark = await contiguous_watermark(session, 0)
+    target = 0 if watermark <= keep else watermark - keep
+    floor = await pruned_through(session)
+    if target <= floor:
+        return floor
+    return await prune_consumed_outbox(session, target)
 
 
 async def committed_notifications(

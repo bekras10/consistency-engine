@@ -1,0 +1,27 @@
+{
+  "policy": "scripts/check_npm_audit.mjs fails if npm audit --omit=dev reports any advisory, if a full npm audit advisory id is absent from this file, or if an id listed here is no longer reported. Critical production issues are not allowlisted.",
+  "advisories": [
+    {
+      "id": "GHSA-vfj7-8cjw-p6xm",
+      "scope": "dev",
+      "severity": "high",
+      "packages": [
+        "braces",
+        "micromatch",
+        "chokidar",
+        "fast-glob",
+        "tailwindcss",
+        "eslint-config-next",
+        "@next/eslint-plugin-next"
+      ],
+      "reason": "braces 3.0.3 is the newest 3.x and is still affected. It is pulled by tailwindcss 3.4.19 (chokidar, micromatch) and by eslint-config-next 15 (fast-glob). Dev and build tooling only, not the production bundle. Clearing it means tailwindcss 4.3.3, a major configuration change. The audit's eslint-config-next fix is a downgrade to 14.2.35, which does not match Next 15."
+    },
+    {
+      "id": "GHSA-rj75-hqrm-r3gf",
+      "scope": "dev",
+      "severity": "moderate",
+      "packages": ["postcss-selector-parser", "postcss-nested", "tailwindcss"],
+      "reason": "postcss-selector-parser 6.x has no patched release. The fixed release is 7.1.6. Tailwind CSS 3 depends on ^6.1.2 through postcss-nested. This runs at build time. Clearing it means tailwindcss 4.3.3. A major override to parser 7 was not applied."
+    }
+  ]
+}

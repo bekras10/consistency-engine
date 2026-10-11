@@ -91,9 +91,12 @@ page HTML, the RSC payload, and `/app-data` responses do not contain the shared 
 `GET` stays open. The capability authorizes only playback actions (`start`, `pause`,
 `resume`, `seek`, `restart`, `step`, `speed`) for that viewer. A post to retention,
 configuration, or any other path is `403` `replay_forbidden` and is not proxied.
-Issuance is capped (`REPLAY_CAPABILITY_MAX`, `REPLAY_CAPABILITY_ISSUE_LIMIT`). The
-cookie is `HttpOnly` and `SameSite=Lax`, and `Secure` on HTTPS or when
-`REPLAY_COOKIE_SECURE=1`. See `docs/security.md`.
+Issuance is capped (`REPLAY_CAPABILITY_MAX`, `REPLAY_CAPABILITY_ISSUE_LIMIT`,
+and per client `REPLAY_CAPABILITY_CLIENT_LIMIT`). The cookie is `HttpOnly` and
+`SameSite=Lax`, and `Secure` on HTTPS or when `REPLAY_COOKIE_SECURE=1`. A
+replay mutation with a foreign `Origin` is `403` `{"error":"cross_origin"}`.
+Same-origin is allowed. A missing `Origin` is allowed for non-browser clients
+that do not send the header. See `docs/security.md`.
 
 Ordinary `/api/v1` requests, other than health and `GET /api/v1/stream`, are limited to
 `API_RATE_LIMIT` per `API_RATE_WINDOW_S` (default 240 per 60 seconds) and time out after
@@ -121,7 +124,11 @@ transaction aborted, or the row is no longer in the log), the stream sends `resy
 tails from the new high-water mark instead of skipping ahead inside a hole. If
 `Last-Event-ID` is greater than every reserved or committed outbox id, the database was
 recreated or restored underneath the client. The stream sends `resync` on connect instead
-of waiting for an id that will not appear.
+of waiting for an id that will not appear. If it is at or below
+`outbox_retention.pruned_through`, the stream sends `resync` as well. It does not
+deliver a later id as if the pruned prefix were a skip. An id still inside the
+retained suffix is replayed from that boundary with no gap. The worker keeps the
+newest `OUTBOX_RETENTION_KEEP` commit-safe ids (default 10000).
 
 `event:` for a tail row is the outbox topic (`detection`). `data` is
 `{"topic", "session_id", "payload"}`. `payload` is the same document the in-process broker

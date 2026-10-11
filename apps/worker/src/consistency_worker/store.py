@@ -24,6 +24,7 @@ class DatabaseSessionStore:
             max_age_hours=settings.retention_max_age_hours,
             max_sessions=settings.retention_max_sessions,
             third_party_hours=settings.retention_third_party_hours,
+            outbox_keep=settings.outbox_retention_keep,
         )
 
     async def ping(self) -> None:

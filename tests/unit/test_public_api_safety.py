@@ -96,6 +96,190 @@ def test_request_timeout_returns_504() -> None:
     assert "Traceback" not in response.text
 
 
+def test_timeout_after_headers_does_not_write_a_second_response() -> None:
+    """A stall during the body must not emit a second status line.
+
+    The client may see a dropped connection. It must not see a 504 written
+    onto a response whose headers were already sent.
+    """
+    from consistency_api.http import RequestTimeout
+
+    messages: list[dict[str, object]] = []
+
+    async def stalled(scope: dict[str, object], receive: object, send: object) -> None:
+        del scope, receive
+        assert callable(send)
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"content-type", b"text/plain")],
+            }
+        )
+        await asyncio.sleep(5)
+        await send({"type": "http.response.body", "body": b"late"})
+
+    middleware = RequestTimeout(stalled, timeout_s=0.05)
+
+    async def send(message: dict[str, object]) -> None:
+        if message.get("type") == "http.response.start" and messages:
+            raise RuntimeError("wrote a 504 on an already-started response")
+        messages.append(message)
+
+    async def receive() -> dict[str, object]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.5"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/api/v1/stall",
+        "raw_path": b"/api/v1/stall",
+        "query_string": b"",
+        "headers": [],
+        "client": ("127.0.0.1", 9),
+        "server": ("test", 80),
+    }
+    asyncio.run(asyncio.wait_for(middleware(scope, receive, send), 2))
+    starts = [item for item in messages if item.get("type") == "http.response.start"]
+    assert len(starts) == 1
+    assert starts[0]["status"] == 200
+    assert all(item.get("status") != 504 for item in messages)
+    body = b"".join(
+        item["body"]
+        for item in messages
+        if item.get("type") == "http.response.body" and isinstance(item.get("body"), bytes)
+    )
+    assert b"timeout" not in body
+
+
+def _http_scope(host: str, xff: str | None = None) -> dict[str, object]:
+    headers: list[tuple[bytes, bytes]] = []
+    if xff is not None:
+        headers.append((b"x-forwarded-for", xff.encode()))
+    return {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.5"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/api/v1/markets",
+        "raw_path": b"/api/v1/markets",
+        "query_string": b"limit=1",
+        "headers": headers,
+        "client": (host, 1234),
+        "server": ("test", 80),
+    }
+
+
+async def _status(app: object, scope: dict[str, object]) -> int:
+    status = 0
+
+    async def receive() -> dict[str, object]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: dict[str, object]) -> None:
+        nonlocal status
+        if message.get("type") == "http.response.start":
+            status = int(message["status"])
+
+    assert callable(app)
+    await app(scope, receive, send)
+    return status
+
+
+async def test_rate_limit_forgets_expired_clients() -> None:
+    from consistency_api.http import RateLimit
+
+    async def ok(scope: dict[str, object], receive: object, send: object) -> None:
+        del scope, receive
+        assert callable(send)
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    limiter = RateLimit(ok, max_requests=5, window_s=0.05)
+    await limiter(_http_scope("10.1.0.1"), _receive_unused, _send_unused)
+    assert "10.1.0.1" in limiter._hits
+    await asyncio.sleep(0.12)
+    await limiter(_http_scope("10.1.0.2"), _receive_unused, _send_unused)
+    assert "10.1.0.1" not in limiter._hits
+
+
+async def _receive_unused() -> dict[str, object]:
+    return {"type": "http.request", "body": b"", "more_body": False}
+
+
+async def _send_unused(message: dict[str, object]) -> None:
+    del message
+
+
+async def test_rate_limit_caps_distinct_clients() -> None:
+    from consistency_api.http import RateLimit
+
+    async def ok(scope: dict[str, object], receive: object, send: object) -> None:
+        del scope, receive
+        assert callable(send)
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    limiter = RateLimit(ok, max_requests=10, window_s=60, max_clients=2)
+    assert await _status(limiter, _http_scope("10.2.0.1")) == 204
+    assert await _status(limiter, _http_scope("10.2.0.2")) == 204
+    assert await _status(limiter, _http_scope("10.2.0.3")) == 429
+    assert len(limiter._hits) <= 2
+    assert await _status(limiter, _http_scope("10.2.0.1")) == 204
+
+
+async def test_spoofed_forwarded_for_does_not_get_a_fresh_bucket() -> None:
+    app = create_app(Settings(API_RATE_LIMIT=1, API_RATE_WINDOW_S=60))
+    assert await _status(app, _http_scope("10.9.9.9", "1.1.1.1")) == 503
+    limited = await _status(app, _http_scope("10.9.9.9", "2.2.2.2"))
+    assert limited == 429
+
+
+async def test_trusted_proxy_limits_the_appended_client_not_a_spoofed_prefix() -> None:
+    app = create_app(
+        Settings(
+            API_RATE_LIMIT=1,
+            API_RATE_WINDOW_S=60,
+            TRUSTED_PROXY_COUNT=1,
+            TRUSTED_PROXIES="10.0.0.8",
+        )
+    )
+    peer = "10.0.0.8"
+    assert await _status(app, _http_scope(peer, "1.1.1.1, 203.0.113.5")) == 503
+    assert await _status(app, _http_scope(peer, "9.9.9.9, 203.0.113.5")) == 429
+    assert await _status(app, _http_scope(peer, "9.9.9.9, 203.0.113.6")) == 503
+    # A peer that is not a configured proxy cannot pick an identity with the header.
+    assert await _status(app, _http_scope("198.51.100.4", "203.0.113.8")) == 503
+    assert await _status(app, _http_scope("198.51.100.4", "203.0.113.9")) == 429
+
+
+def test_replay_mutation_rejects_a_foreign_origin(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REPLAY_API_TOKEN", "tok")
+    monkeypatch.setenv("REPLAY_MUTATIONS_PUBLIC", "false")
+    app = create_app(Settings())
+    client = TestClient(app)
+    foreign = client.post(
+        "/api/v1/replay/sessions/missing/pause",
+        headers={"x-replay-token": "tok", "origin": "https://evil.example"},
+    )
+    assert foreign.status_code == 403
+    assert foreign.json() == {"error": "cross_origin"}
+    same = client.post(
+        "/api/v1/replay/sessions/missing/pause",
+        headers={"x-replay-token": "tok", "origin": "http://testserver"},
+    )
+    assert same.status_code == 404
+    missing = client.post(
+        "/api/v1/replay/sessions/missing/pause",
+        headers={"x-replay-token": "tok"},
+    )
+    assert missing.status_code == 404
+
+
 def test_routes_do_not_fetch_urls_or_run_shell() -> None:
     source = inspect.getsource(routes)
     for banned in ("subprocess", "os.system", "urlopen", "httpx", "aiohttp"):

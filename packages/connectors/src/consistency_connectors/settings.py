@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     retention_max_sessions: int = Field(default=20, alias="RETENTION_MAX_SESSIONS")
     retention_third_party_hours: int = Field(default=0, alias="RETENTION_THIRD_PARTY_HOURS")
     retention_interval_s: int = Field(default=3600, alias="RETENTION_INTERVAL_S")
+    # Newest committed notification ids kept by the worker retention loop.
+    # A Last-Event-ID inside this suffix is replayed. A cursor at or below the
+    # stored floor gets an SSE resync. See docs/security.md.
+    outbox_retention_keep: int = Field(default=10_000, alias="OUTBOX_RETENTION_KEEP")
 
     # Pipeline
     sweep_interval_ms: int = Field(default=100, alias="SWEEP_INTERVAL_MS")
@@ -76,6 +80,11 @@ class Settings(BaseSettings):
     api_request_timeout_s: float = Field(default=30.0, alias="API_REQUEST_TIMEOUT_S")
     api_rate_limit: int = Field(default=240, alias="API_RATE_LIMIT")
     api_rate_window_s: float = Field(default=60.0, alias="API_RATE_WINDOW_S")
+    api_rate_max_clients: int = Field(default=4096, alias="API_RATE_MAX_CLIENTS")
+    # Both must be set before X-Forwarded-For is read. Count is the number of
+    # trusted hops from the right. Proxies are exact TCP peer addresses.
+    trusted_proxy_count: int = Field(default=0, alias="TRUSTED_PROXY_COUNT")
+    trusted_proxies: str = Field(default="", alias="TRUSTED_PROXIES")
     cors_origins: str = Field(
         default="http://127.0.0.1:3000,http://localhost:3000", alias="CORS_ORIGINS"
     )
@@ -103,6 +112,7 @@ class Settings(BaseSettings):
             "supervisor_max_restarts",
             "api_port",
             "api_rate_limit",
+            "api_rate_max_clients",
         ):
             if getattr(self, name) <= 0:
                 raise ConfigurationError(f"{name.upper()} must be positive.")
@@ -119,6 +129,10 @@ class Settings(BaseSettings):
             raise ConfigurationError("retention limits must be >= 0.")
         if self.retention_third_party_hours < 0 or self.retention_interval_s < 0:
             raise ConfigurationError("retention limits must be >= 0.")
+        if self.outbox_retention_keep < 0:
+            raise ConfigurationError("OUTBOX_RETENTION_KEEP must be >= 0.")
+        if self.trusted_proxy_count < 0:
+            raise ConfigurationError("TRUSTED_PROXY_COUNT must be >= 0.")
         return self
 
     @property

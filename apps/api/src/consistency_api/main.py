@@ -11,7 +11,7 @@ from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from consistency_api.http import RateLimit, RequestTimeout, register_errors
+from consistency_api.http import RateLimit, RequestTimeout, register_errors, trusted_proxy_set
 from consistency_api.routes import router
 from consistency_connectors.settings import ConfigurationError, Settings
 from consistency_core.redact import configure
@@ -55,13 +55,23 @@ def create_app(
     limit = 240 if resolved is None else resolved.api_rate_limit
     window_s = 60.0 if resolved is None else resolved.api_rate_window_s
     timeout_s = 30.0 if resolved is None else resolved.api_request_timeout_s
+    max_clients = 4096 if resolved is None else resolved.api_rate_max_clients
+    proxy_count = 0 if resolved is None else resolved.trusted_proxy_count
+    proxies = frozenset[str]() if resolved is None else trusted_proxy_set(resolved.trusted_proxies)
     origins = _origins(
         os.environ.get("CORS_ORIGINS", "http://127.0.0.1:3000,http://localhost:3000")
         if resolved is None
         else resolved.cors_origins
     )
     configure("INFO" if resolved is None else resolved.log_level)
-    app.add_middleware(RateLimit, max_requests=limit, window_s=window_s)
+    app.add_middleware(
+        RateLimit,
+        max_requests=limit,
+        window_s=window_s,
+        max_clients=max_clients,
+        trusted_proxy_count=proxy_count,
+        trusted_proxies=proxies,
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,

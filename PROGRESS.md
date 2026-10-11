@@ -693,3 +693,34 @@ Verification on this machine (Docker Postgres 16.15, host port 5433): `make lint
 
 The benchmark numbers above were not remeasured in this phase. Pricing, detection math, and golden expected values were not changed. Phase 15 deployment was not started.
 
+## Corrections before Phase 15 — 2026-10-11
+
+Regression tests were added first and failed, then the code was fixed. Golden expected values in `fixtures/golden` and `tests/golden` were not edited. No new Alembic revision. `0004_outbox_retention` already stores the floor. Nothing was deployed. Phase 15 was not started in this change.
+
+| Issue | Regression | Pre-fix failure | Design |
+|---|---|---|---|
+| Response timeout after headers | `test_timeout_after_headers_does_not_write_a_second_response` | `RuntimeError: wrote a 504 on an already-started response` | `RequestTimeout` records `http.response.start`. After headers are sent, a stall returns without a second response. The client can see a dropped connection |
+| Expired rate-limit entries | `test_rate_limit_forgets_expired_clients` | After the window, `10.1.0.1` was still in the map | Entries whose newest hit is older than the window are dropped on the next check |
+| Rate-limit memory cap | `test_rate_limit_caps_distinct_clients` | `TypeError: RateLimit.__init__() got an unexpected keyword argument 'max_clients'` | `API_RATE_MAX_CLIENTS` default 4096. A new identity past the cap is `429` and is not stored |
+| Spoofed forwarded header | `test_spoofed_forwarded_for_does_not_get_a_fresh_bucket` | This case already passed: `X-Forwarded-For` was ignored | It stays ignored unless `TRUSTED_PROXY_COUNT` is at least 1 and the TCP peer is listed in `TRUSTED_PROXIES` |
+| Trusted proxy identity | `test_trusted_proxy_limits_the_appended_client_not_a_spoofed_prefix` | `assert 429 == 503`. A new rightmost address was still limited with the TCP peer | The client is the hop the trusted proxy appended. An untrusted peer ignores the header |
+| Concurrent outbox prune | `test_overlapping_prunes_keep_a_monotonic_floor` | `assert 10 == 30`. The lower prune committed last | Advisory lock `884422332` plus `GREATEST` on `pruned_through`. A prune below the floor deletes nothing |
+| Outbox maintenance | `test_retention_prunes_outbox_to_the_consumer_watermark` | `TypeError: RetentionPolicy.__init__() got an unexpected keyword argument 'outbox_keep'` | The worker retention loop calls `maintain_outbox`. The target is `max(0, watermark - OUTBOX_RETENTION_KEEP)`. The default keep is 10000 |
+| SSE after prune | `test_sse_resyncs_below_the_floor_and_replays_inside_it` | The same `outbox_keep` error, so the floor never moved | A `Last-Event-ID` below the floor full-resyncs. A cursor inside the retained log replays from that id with no gap |
+| Replay client throttle | `throttles a flooded client and still issues to another`; `does not let a rotated forwarded header exceed the per-client cap` | The third issue for one client still succeeded. A rotated `X-Forwarded-For` received another cookie | `REPLAY_CAPABILITY_CLIENT_LIMIT` default 5, beside the global outstanding cap and the 30-per-60s issue limit. Without trusted-proxy settings every issuer shares the key `direct` |
+| Foreign Origin | `test_replay_mutation_rejects_a_foreign_origin`; `rejects a foreign Origin on a replay mutation` | The API returned 404. The dashboard proxy returned 503 because the gateway was down | Origin is checked before the token and before the gateway fetch. A foreign origin is `403` `cross_origin`. A missing Origin is allowed for non-browser clients |
+| Loopback Origin | `allows a loopback Origin when Next rewrites the request URL to localhost` | Playwright stayed on `ready · cursor 0/12277`. The gateway log had no start POST. Capability issuance with `Origin: http://127.0.0.1:3000` returned 403 | `localhost` and `127.0.0.1` on the same port and scheme are the same local site. The `Host` header is accepted. A different host is still `403` |
+
+Dependency audit on this machine:
+
+- The starting `npm audit` reported 14 findings (2 critical, 8 high, 4 moderate). The production findings were PostCSS 8.4.31 nested under Next 15.5.27. Direct `postcss` is pinned to `8.5.29` with the same npm override. Next 16 was not installed. `npm audit --omit=dev` then reported zero findings. Vitest moved from 3.2.7 to 5.0.3, which dropped the tinypool and `@vitest/mocker` criticals. `npm audit fix --force` was not run.
+- `node scripts/check_npm_audit.mjs` printed `npm audit advisories: 2 advisory id(s); production advisories: 0.`, then `GHSA-vfj7-8cjw-p6xm high packages=braces` and `GHSA-rj75-hqrm-r3gf moderate packages=postcss-selector-parser`, then `npm audit matches the allowlist. Production audit is empty.`
+- Both residuals are devDependencies. `GHSA-vfj7-8cjw-p6xm` is `braces` 3.0.3, the latest 3.x, through Tailwind 3 and `eslint-config-next`. `GHSA-rj75-hqrm-r3gf` is `postcss-selector-parser` 6.x; the patched release is 7.1.6, which Tailwind 3 does not use. Clearing either is a Tailwind 4 migration. They are named in `docs/security.md` and `apps/web/npm-audit-allowlist.json`.
+- `uv pip audit` is not a subcommand. `uv export --frozen --all-groups --no-emit-workspace -o /tmp/ce-reqs.txt` then `uvx pip-audit --requirement /tmp/ce-reqs.txt --disable-pip` (`pip-audit` 2.10.1) printed `No known vulnerabilities found` and exited 0. CI runs that check.
+
+Verification (Docker Postgres 16.15, host port 5433): `make lint` clean, `make typecheck` clean (88 source files). `make test` 468 passed, 0 failed, in 87.48s. Suites: unit 358, golden 34, property 24, replay 14, integration 38. Frontend after the loopback Origin fix: Vitest 18 passed (5 files), `tsc --noEmit` clean, `eslint .` clean, `next build` succeeded (Next.js 15.5.27). `scripts/e2e.sh` with `E2E_SKIP_COMPOSE=1` and `POSTGRES_PORT=5433` printed `Replay proxy: 401 without a token; viewers viewer-2a04e262a3e047adaad0c9fc7fc6659d and viewer-6906abe4a0e64e828f1a05b57e4d01d2 seek to cursors 0 and 12277.`, then Playwright `e2e/dashboard.spec.ts` 1 passed (13.7s) and `e2e/disconnected.spec.ts` 1 passed (139ms), then `Playwright passed, including the disconnected page.`
+
+The first Playwright run after the Origin check, before the loopback fix, failed at `e2e/dashboard.spec.ts:32`. It expected `/playing|paused|finished/` and received `ready · cursor 0/12277 · position — · speed 1`.
+
+The inconsistency-workload end-to-end median of 2281.125 ms was not remeasured. Pricing, detection math, and golden expected values were not changed.
+

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from sqlalchemy import text
 
@@ -10,6 +12,7 @@ from consistency_persistence.outbox import (
     CLAIM_PAGE_SIZE,
     committed_notifications,
     prune_consumed_outbox,
+    pruned_through,
 )
 
 pytestmark = pytest.mark.integration
@@ -95,5 +98,51 @@ async def test_prune_stops_at_the_watermark_and_does_not_skip(db: str) -> None:
         assert notes == []
         assert blocked_tail is False
         assert [note.id for note in tail] == list(range(consumed + 1, _HISTORY + 1))
+    finally:
+        await engine.dispose()
+
+
+async def test_overlapping_prunes_keep_a_monotonic_floor(db: str) -> None:
+    """Two prunes in flight must not move the stored floor backward.
+
+    The higher watermark commits first. Without a lock the slower, lower
+    prune still writes the floor it read at the start. Ids above the
+    commit-safe watermark stay.
+    """
+    total = 40
+    high = 30
+    low = 10
+    await _seed(db, total)
+    engine = make_engine(db)
+    maker = make_sessionmaker(engine)
+
+    async def prune_to(consumed: int) -> int:
+        async with maker() as session, session.begin():
+            return await prune_consumed_outbox(session, consumed)
+
+    try:
+        high_floor, low_floor = await asyncio.gather(prune_to(high), prune_to(low))
+        async with maker() as session:
+            stored = await pruned_through(session)
+            kept = await session.scalar(
+                text("SELECT COUNT(*) FROM outbox_claims WHERE id > :high"),
+                {"high": high},
+            )
+            removed = await session.scalar(
+                text("SELECT COUNT(*) FROM notification_outbox WHERE id <= :high"),
+                {"high": high},
+            )
+            above = await session.scalar(
+                text("SELECT COUNT(*) FROM notification_outbox WHERE id > :total"),
+                {"total": total},
+            )
+            max_id = await session.scalar(text("SELECT MAX(id) FROM notification_outbox"))
+        assert high_floor == high
+        assert low_floor == high
+        assert stored == high
+        assert kept == total - high
+        assert removed == 0
+        assert above == 0
+        assert max_id == total
     finally:
         await engine.dispose()

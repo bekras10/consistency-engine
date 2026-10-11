@@ -6,6 +6,16 @@ so a demo can be reconstructed exactly. Third-party sources persist no raw rows 
 ``THIRD_PARTY_RAW_PERSISTENCE_AUTHORIZED`` is set; any raw rows that were authorized are
 removed once they are older than ``RETENTION_THIRD_PARTY_HOURS`` (0 removes them on the next
 run). Detections, relationships, and reference data are not deleted by this job.
+
+The same retention pass also prunes ``notification_outbox`` and ``outbox_claims``.
+``outbox_keep`` (``OUTBOX_RETENTION_KEEP``, default 10000) is how many of the newest
+commit-safe ids stay. The consumer watermark is the contiguous outbox watermark.
+Ids at or below ``watermark - outbox_keep`` may be deleted, and never an id above
+that watermark. A ``Last-Event-ID`` still inside the retained suffix is replayed.
+A cursor at or below the stored floor is an SSE full resync, not a skip. Detection
+rows stay, so that resync still has the current snapshot. 10000 is larger than the
+bundled inconsistent session's detection-event count, so a normal synthetic run
+does not prune a live cursor, and the table cannot grow without a bound.
 """
 
 from __future__ import annotations
@@ -28,6 +38,7 @@ class RetentionPolicy:
     max_age_hours: int
     max_sessions: int
     third_party_hours: int
+    outbox_keep: int = 10_000
 
 
 @dataclass(frozen=True)

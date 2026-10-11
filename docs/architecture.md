@@ -156,7 +156,11 @@ resynchronization snapshot when the tail is uncertain. SSE `id:` is the outbox i
 Reconnecting with `Last-Event-ID` replays that boundary event so a client can apply it
 idempotently. If `Last-Event-ID` is greater than every reserved or committed outbox id,
 the stream sends `resync` immediately instead of waiting for an id the restored database
-will not produce. See `docs/api-reference.md`.
+will not produce. The worker retention loop deletes a committed prefix down to
+`contiguous_watermark - OUTBOX_RETENTION_KEEP` (default keep 10000) under an advisory
+lock, and the stored floor only moves forward. A cursor at or below that floor
+full-resyncs. A cursor still inside the retained suffix does not lose events.
+See `docs/api-reference.md`.
 
 ## Dashboard
 

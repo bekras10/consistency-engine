@@ -1,4 +1,4 @@
-import { issueCapability } from "@/lib/replay-capability";
+import { capabilityClientKey, issueCapability, replayOriginAllowed } from "@/lib/replay-capability";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +9,16 @@ function requestIsSecure(request: Request): boolean {
 
 /** Issue an httpOnly viewer capability. The body is not a credential. */
 export async function POST(request: Request) {
-  const issued = issueCapability(Date.now(), { secure: requestIsSecure(request) });
+  if (!replayOriginAllowed(request)) {
+    return new Response(JSON.stringify({ error: "cross_origin" }), {
+      status: 403,
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    });
+  }
+  const issued = issueCapability(Date.now(), {
+    secure: requestIsSecure(request),
+    client: capabilityClientKey(request),
+  });
   if (!issued.ok) {
     return new Response(JSON.stringify({ error: "rate_limited" }), {
       status: 429,
