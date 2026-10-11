@@ -27,6 +27,49 @@ from consistency_persistence.schema import (
 )
 from consistency_persistence.timeutil import now_utc
 
+_CREDENTIAL_KEYS = frozenset(
+    {
+        "password",
+        "passwd",
+        "secret",
+        "api_key",
+        "token",
+        "authorization",
+        "database_url",
+        "replay_api_token",
+        "cookie",
+    }
+)
+
+
+def _url_has_password(value: str) -> bool:
+    _scheme, separator, rest = value.partition("://")
+    if not separator:
+        return False
+    userinfo, at, _host = rest.partition("@")
+    return bool(at) and ":" in userinfo and " " not in userinfo
+
+
+def assert_no_credentials(document: object) -> None:
+    """Refuse a document that would store a third-party credential in PostgreSQL."""
+
+    def walk(value: object, key: str = "") -> None:
+        if key.lower() in _CREDENTIAL_KEYS:
+            raise ValueError("refusing to store a credential in PostgreSQL")
+        if isinstance(value, str):
+            if _url_has_password(value) or "ce_replay_capability=" in value.lower():
+                raise ValueError("refusing to store a credential in PostgreSQL")
+            return
+        if isinstance(value, dict):
+            for item_key, item in value.items():
+                walk(item, str(item_key))
+            return
+        if isinstance(value, list):
+            for item in value:
+                walk(item, key)
+
+    walk(document)
+
 
 def _doc(model: Any) -> dict[str, Any]:
     document: dict[str, Any] = model.model_dump(mode="json")
@@ -238,6 +281,7 @@ async def upsert_fee_schedules(session: AsyncSession, schedules: list[FeeSchedul
 async def upsert_configuration(
     session: AsyncSession, *, version_id: str, kind: str, document: dict[str, Any]
 ) -> None:
+    assert_no_credentials(document)
     stmt = pg_insert(ConfigurationVersionRow).values(
         version_id=version_id,
         kind=kind,

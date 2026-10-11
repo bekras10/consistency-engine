@@ -4,6 +4,16 @@ import { randomBytes } from "node:crypto";
 
 export const CAPABILITY_COOKIE = "ce_replay_capability";
 
+const PLAYBACK_ACTIONS = new Set([
+  "start",
+  "pause",
+  "resume",
+  "seek",
+  "restart",
+  "step",
+  "speed",
+]);
+
 type Capability = {
   recordingId: string | null;
   viewerId: string | null;
@@ -11,9 +21,15 @@ type Capability = {
 };
 
 const capabilities = new Map<string, Capability>();
+const issuedAt: number[] = [];
 
 export function clearCapabilities(): void {
   capabilities.clear();
+  issuedAt.length = 0;
+}
+
+export function outstandingCapabilities(): number {
+  return capabilities.size;
 }
 
 export function capabilityTtlSeconds(): number {
@@ -23,7 +39,40 @@ export function capabilityTtlSeconds(): number {
   return Math.floor(parsed);
 }
 
-export function issueCapability(now = Date.now()): { setCookie: string } {
+function positiveInt(name: string, fallback: number): number {
+  const raw = readEnv(name).trim();
+  const parsed = Number(raw);
+  if (!raw || !Number.isFinite(parsed) || parsed < 1) return fallback;
+  return Math.floor(parsed);
+}
+
+export function capabilityMax(): number {
+  return positiveInt("REPLAY_CAPABILITY_MAX", 256);
+}
+
+export function issueLimit(): number {
+  return positiveInt("REPLAY_CAPABILITY_ISSUE_LIMIT", 30);
+}
+
+export function issueWindowMs(): number {
+  return positiveInt("REPLAY_CAPABILITY_ISSUE_WINDOW_S", 60) * 1000;
+}
+
+export function pruneExpired(now = Date.now()): void {
+  for (const [id, cap] of capabilities) {
+    if (cap.expiresAt <= now) capabilities.delete(id);
+  }
+}
+
+export type IssueResult = { ok: true; setCookie: string } | { ok: false; error: "rate_limited" };
+
+export function issueCapability(now = Date.now(), opts?: { secure?: boolean }): IssueResult {
+  pruneExpired(now);
+  const windowMs = issueWindowMs();
+  while (issuedAt.length > 0 && now - issuedAt[0] > windowMs) issuedAt.shift();
+  if (issuedAt.length >= issueLimit() || capabilities.size >= capabilityMax()) {
+    return { ok: false, error: "rate_limited" };
+  }
   const id = randomBytes(32).toString("base64url");
   const ttl = capabilityTtlSeconds();
   capabilities.set(id, {
@@ -31,8 +80,11 @@ export function issueCapability(now = Date.now()): { setCookie: string } {
     viewerId: null,
     expiresAt: now + ttl * 1000,
   });
-  const setCookie = `${CAPABILITY_COOKIE}=${id}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${ttl}`;
-  return { setCookie };
+  issuedAt.push(now);
+  const flags = ["HttpOnly", "SameSite=Lax", "Path=/", `Max-Age=${ttl}`];
+  if (opts?.secure) flags.splice(1, 0, "Secure");
+  const setCookie = `${CAPABILITY_COOKIE}=${id}; ${flags.join("; ")}`;
+  return { ok: true, setCookie };
 }
 
 export function readCapabilityId(cookieHeader: string | null): string {
@@ -52,8 +104,9 @@ export type ReplayGate =
 
 /**
  * A capability with no viewer may only start a recording. After start binds a
- * viewer id, that capability may command only that viewer. ``viewer-`` ids are
- * the fork prefix from ``ReplayHost``.
+ * viewer id, that capability may command only that viewer's playback actions.
+ * It does not authorize retention, configuration, or any other mutation.
+ * ``viewer-`` ids are the fork prefix from ``ReplayHost``.
  */
 export function authorizeReplayMutation(
   cookieHeader: string | null,
@@ -65,6 +118,9 @@ export function authorizeReplayMutation(
   if (!id || !cap || cap.expiresAt <= now) {
     if (id) capabilities.delete(id);
     return { ok: false, status: 401, error: "unauthorized" };
+  }
+  if (path[0] !== "replay" || !PLAYBACK_ACTIONS.has(path[2] ?? "")) {
+    return { ok: false, status: 403, error: "replay_forbidden" };
   }
   const target = path[1] ?? "";
   const action = path[2] ?? "";

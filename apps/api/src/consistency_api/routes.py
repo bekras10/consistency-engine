@@ -39,6 +39,7 @@ from consistency_persistence.outbox import (
     committed_notifications,
     contiguous_watermark,
     highest_outbox_id,
+    pruned_through,
 )
 from consistency_persistence.replay_host import ReplayCapacityError, ReplayHost, snapshot
 from consistency_persistence.schema import DetectionRow, IngestionSessionRow
@@ -521,6 +522,13 @@ async def _tail(
         nonlocal cursor, boundary_checked, sent_open
         if not sent_open:
             sent_open = True
+            async with maker() as session:
+                watermark, payload = await _resync(session)
+            cursor = watermark
+            return [_frame(watermark, "resync", payload)]
+        async with maker() as session:
+            floor = await pruned_through(session)
+        if cursor < floor:
             async with maker() as session:
                 watermark, payload = await _resync(session)
             cursor = watermark

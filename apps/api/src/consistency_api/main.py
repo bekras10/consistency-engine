@@ -11,15 +11,15 @@ from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from consistency_api.http import RateLimit, register_errors
+from consistency_api.http import RateLimit, RequestTimeout, register_errors
 from consistency_api.routes import router
 from consistency_connectors.settings import ConfigurationError, Settings
+from consistency_core.redact import configure
 from consistency_persistence.db import make_engine, make_sessionmaker, ping
 from consistency_persistence.replay_host import BookTail, ReplayHost
 
 
-def _origins() -> list[str]:
-    raw = os.environ.get("CORS_ORIGINS", "http://127.0.0.1:3000,http://localhost:3000")
+def _origins(raw: str) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
@@ -48,18 +48,28 @@ def create_app(
         if engine is not None:
             await engine.dispose()
 
-    app = FastAPI(title="Consistency Engine API", version="0.11.0", lifespan=lifespan)
+    app = FastAPI(title="Consistency Engine API", version="0.14.0", lifespan=lifespan)
     app.state.sessions = sessions
     app.state.replay = replay if replay is not None else ReplayHost()
     app.state.books = books if books is not None else BookTail()
-    app.add_middleware(RateLimit)
+    limit = 240 if resolved is None else resolved.api_rate_limit
+    window_s = 60.0 if resolved is None else resolved.api_rate_window_s
+    timeout_s = 30.0 if resolved is None else resolved.api_request_timeout_s
+    origins = _origins(
+        os.environ.get("CORS_ORIGINS", "http://127.0.0.1:3000,http://localhost:3000")
+        if resolved is None
+        else resolved.cors_origins
+    )
+    configure("INFO" if resolved is None else resolved.log_level)
+    app.add_middleware(RateLimit, max_requests=limit, window_s=window_s)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=_origins(),
+        allow_origins=origins,
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["Content-Type", "X-Replay-Token", "Last-Event-ID"],
         allow_credentials=False,
     )
+    app.add_middleware(RequestTimeout, timeout_s=timeout_s)
     register_errors(app)
     app.include_router(router)
 
@@ -78,7 +88,10 @@ def create_app(
             }
         body: dict[str, Any] = {"status": "ready", "configuration": resolved.redacted()}
         if resolved.database_url:
-            database_ok = await ping(resolved.database_url)
+            try:
+                database_ok = await ping(resolved.database_url)
+            except Exception:
+                database_ok = False
             body["database"] = "ok" if database_ok else "unavailable"
             if not database_ok:
                 response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE

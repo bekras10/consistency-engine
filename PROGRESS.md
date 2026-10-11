@@ -658,3 +658,38 @@ helpers, which the old script did not have. `test_loopback_hosts_on_5433_are_all
 
 Remeasured with `make benchmark` on the same Apple M3, 16 GiB, Darwin 26.6.2, Python 3.12.11, Docker Postgres 16.15 on port 5433. The process exited 0 in 482.5 s. Steady-state median msg/s (cold excluded): 54 markets 773, 270 markets 794, 1026 markets 666, 5022 markets 0 (mean of those windows 309.76; full-run median 152.79, session open median 38.10 s). Inconsistency workload: OPENED 12, UPDATED 120, EXPIRED 7, RESOLVED 5; money matched the engine; steady median 452 msg/s; certificate p50 0.6041 ms; detection-commit p50 18.3789 ms; end-to-end p50 2281.125 ms. Recovery medians: gap 0.0374 ms, request 0.0490 ms, snapshot arrival 286.3013 ms, full resync 9.2444 ms. Details, scope labels, and the prior table are in `docs/benchmarks.md`. Golden expected values were not edited. Pricing and detection code were not changed.
 
+Part A commit `eb3dab1` was pushed to `main`. GitHub Actions run
+https://github.com/bekras10/consistency-engine/actions/runs/38101441408 finished with conclusion `success`.
+
+## Phase 14 — reliability and security — 2026-10-10
+
+Nothing was deployed. No public host was started. The Kalshi connector was not called.
+`docs/security.md` is the operator description. `.env.example` lists every variable the
+process reads, with local placeholders only.
+
+| Area | Test | Design |
+|---|---|---|
+| Secret redaction | `test_log_line_redacts_secrets`, `test_redact_text_strips_url_password_token_and_cookie` | JSON logs. URL passwords, `token=` / `password=`, `REPLAY_API_TOKEN`, capability cookies, and sensitive field names become `***` |
+| Readiness | `test_ready_fails_closed_when_the_database_is_down` | A failed or raising ping is `503` `database_unavailable`. The body has no URL and no exception text |
+| Public errors | `test_unhandled_error_has_no_stack_trace`, `test_invalid_input_is_422_without_a_stack` | `500` is `{"error":"internal_error"}`. Invalid query input is `422` `invalid_request` |
+| Rate limit and timeout | `test_rate_limit_rejects_the_next_request`, `test_request_timeout_returns_504` | Default 240 requests / 60 s on `/api/v1` except health. Other routes except health and `/api/v1/stream` time out as `504` |
+| No URL fetch or shell | `test_routes_do_not_fetch_urls_or_run_shell` | `consistency_api.routes` does not call a shell or an HTTP client. Extra `url` and `command` query parameters are not fetched |
+| Credentials | `test_configuration_document_rejects_credentials`, `test_schema_has_no_credential_columns`, `test_worker_command_line_omits_secrets` | Config documents cannot store passwords, URL userinfo, or capability cookies. The worker argv is `python -m consistency_worker` |
+| Capability cap | `caps outstanding capabilities`, `removes expired capabilities before issuing another`, `sets HttpOnly, SameSite, and Secure when the request is HTTPS` | Expired entries are removed. Outstanding cap and issuance rate return `429`. Cookie is `HttpOnly`, `SameSite=Lax`, and `Secure` on HTTPS or `REPLAY_COOKIE_SECURE=1` |
+| Viewer is not an operator | `does not let a viewer capability call a non-replay mutation` | A capability may only POST playback actions for its viewer. Retention, config, and other actions are `403` and are not proxied |
+| Viewer cursors | `test_two_api_processes_do_not_share_viewer_cursors` | Each `create_app` has its own `ReplayHost`. A new process starts with an empty map |
+| Detection identity | `test_detection_id_is_the_primary_key`; existing `test_restart_continues_lifecycle_without_duplicates` and `test_worker_recovers_after_postgres_container_restart` | `detection_id` is the primary key. Those restart tests still passed in this run |
+| Outbox scale | `test_unscanned_gap_is_not_treated_as_aborted`, `test_claim_page_size_is_a_bound`, `test_large_history_is_readable_from_the_tail`, `test_prune_stops_at_the_watermark_and_does_not_skip` | Claim reads use `LIMIT`. Prune deletes only `id <= consumed_through` when that is at or below the commit-safe watermark. A cursor below the floor is blocked and does not receive later ids as a skip. Migration `0004_outbox_retention` |
+| Environment | `test_env_example_documents_every_variable` | `.env.example` names every `Settings` alias and the dashboard, SSE, and benchmark flags |
+
+Pool pre-ping is asserted by `test_engine_checks_connections_before_checkout`. Graceful stop remains `test_worker_stop_on_deterministic_source_leaves_session_resumable`. The existing outbox race, liveness, and snapshot tests passed unchanged.
+
+Dependency audit, this machine:
+
+- `uv pip audit` is not a subcommand (`unrecognized subcommand 'audit'`). `pip-audit` 2.10.1 on `uv export --frozen --all-groups` printed `No known vulnerabilities found` and skipped the seven workspace packages because they are not on PyPI. Exit 0.
+- `npm audit` in `apps/web` reported 14 vulnerabilities: 2 critical, 8 high, 4 moderate, 0 low, 0 info. Critical is `vitest` / `tinypool` (fix `vitest@5.0.3`, major). High includes `postcss` nested under `next` (fix `next@16.4.0`, major) and `tailwindcss` 3.x via `braces` / `micromatch` (fix `tailwindcss@4.3.3`, major). `npm audit fix` without `--force` does not clear them. `--force` was not run.
+
+Verification on this machine (Docker Postgres 16.15, host port 5433): `make lint` clean, `make typecheck` clean (88 source files). Suites: unit 352 passed, golden 34 passed, property 24 passed, replay 14 passed, integration 35 passed. Total 459 passed, 0 failed, 0 skipped. `tests/integration/test_schema.py` passed both tests, including upgrade/downgrade/upgrade, and the session fixture applied `0004_outbox_retention`. Frontend: eslint clean, `tsc --noEmit` clean, Vitest 14 passed, `next build` succeeded (Next.js 15.5.27). `scripts/e2e.sh` with `E2E_SKIP_COMPOSE=1` and `DATABASE_URL` on port 5433 printed `Replay proxy: 401 without a token; viewers viewer-fd8cdccb5da842f3aae7239032d3f025 and viewer-d0f60c80ad2444358e616099b1df0700 seek to cursors 0 and 12277.`, then Playwright `dashboard.spec.ts` 1 passed (14.5s) and `disconnected.spec.ts` 1 passed (139ms), then `Playwright passed, including the disconnected page.`
+
+The benchmark numbers above were not remeasured in this phase. Pricing, detection math, and golden expected values were not changed. Phase 15 deployment was not started.
+

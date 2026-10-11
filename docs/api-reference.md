@@ -88,7 +88,17 @@ at another viewer is `403` `{"error":"replay_forbidden"}`. A missing or expired 
 is `401` `{"error":"unauthorized"}`, including a request that presents `X-Replay-Token` and
 no cookie. The Next server attaches `X-Replay-Token` only on the hop to the gateway. The
 page HTML, the RSC payload, and `/app-data` responses do not contain the shared token.
-`GET` stays open.
+`GET` stays open. The capability authorizes only playback actions (`start`, `pause`,
+`resume`, `seek`, `restart`, `step`, `speed`) for that viewer. A post to retention,
+configuration, or any other path is `403` `replay_forbidden` and is not proxied.
+Issuance is capped (`REPLAY_CAPABILITY_MAX`, `REPLAY_CAPABILITY_ISSUE_LIMIT`). The
+cookie is `HttpOnly` and `SameSite=Lax`, and `Secure` on HTTPS or when
+`REPLAY_COOKIE_SECURE=1`. See `docs/security.md`.
+
+Ordinary `/api/v1` requests, other than health and `GET /api/v1/stream`, are limited to
+`API_RATE_LIMIT` per `API_RATE_WINDOW_S` (default 240 per 60 seconds) and time out after
+`API_REQUEST_TIMEOUT_S` (default 30 seconds). The bodies are `429` `rate_limited` and
+`504` `timeout`. Neither includes a stack trace.
 
 If `DASHBOARD_GATEWAY_HOST` is not loopback (`127.0.0.1`, `::1`, or `localhost`), the
 gateway requires the token on its own replay posts. The default bind is `127.0.0.1`.

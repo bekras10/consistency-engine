@@ -70,6 +70,16 @@ class Settings(BaseSettings):
     supervisor_backoff_base_s: float = Field(default=0.5, alias="SUPERVISOR_BACKOFF_BASE_S")
     supervisor_backoff_max_s: float = Field(default=30.0, alias="SUPERVISOR_BACKOFF_MAX_S")
 
+    # Public API. Health probes are not rate limited and are not subject to the request timeout.
+    api_host: str = Field(default="0.0.0.0", alias="API_HOST")
+    api_port: int = Field(default=8000, alias="API_PORT")
+    api_request_timeout_s: float = Field(default=30.0, alias="API_REQUEST_TIMEOUT_S")
+    api_rate_limit: int = Field(default=240, alias="API_RATE_LIMIT")
+    api_rate_window_s: float = Field(default=60.0, alias="API_RATE_WINDOW_S")
+    cors_origins: str = Field(
+        default="http://127.0.0.1:3000,http://localhost:3000", alias="CORS_ORIGINS"
+    )
+
     @model_validator(mode="after")
     def _guard(self) -> Settings:
         if self.enable_live_trading:
@@ -90,10 +100,24 @@ class Settings(BaseSettings):
             "outbox_maxsize",
             "update_queue_maxsize",
             "inbound_queue_maxsize",
+            "supervisor_max_restarts",
+            "api_port",
+            "api_rate_limit",
+        ):
+            if getattr(self, name) <= 0:
+                raise ConfigurationError(f"{name.upper()} must be positive.")
+        for name in (
+            "heartbeat_timeout_s",
+            "supervisor_backoff_base_s",
+            "supervisor_backoff_max_s",
+            "api_request_timeout_s",
+            "api_rate_window_s",
         ):
             if getattr(self, name) <= 0:
                 raise ConfigurationError(f"{name.upper()} must be positive.")
         if min(self.retention_max_age_hours, self.retention_max_sessions) < 0:
+            raise ConfigurationError("retention limits must be >= 0.")
+        if self.retention_third_party_hours < 0 or self.retention_interval_s < 0:
             raise ConfigurationError("retention limits must be >= 0.")
         return self
 

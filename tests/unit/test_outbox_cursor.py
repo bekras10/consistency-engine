@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from consistency_persistence.outbox import publication_prefix
+from consistency_persistence.outbox import (
+    CLAIM_PAGE_SIZE,
+    holes_for_claims,
+    publication_prefix,
+)
 
 
 def test_contiguous_prefix_while_a_gap_might_still_commit() -> None:
@@ -30,6 +34,32 @@ def test_cursor_does_not_move_past_a_held_gap() -> None:
     blocked, delivered = publication_prefix([10, 11], 9, {})
     assert blocked is False
     assert delivered == [10, 11]
+
+
+def test_unscanned_gap_is_not_treated_as_aborted() -> None:
+    holes = holes_for_claims([7], 0, {5: "xid"}, {5: "committed"}, scanned_through=5)
+    assert holes[6] == "unknown"
+    blocked, chosen = publication_prefix([7], 0, holes)
+    assert blocked is True
+    assert chosen == []
+
+
+def test_complete_scan_still_skips_an_aborted_hole() -> None:
+    holes = holes_for_claims([7], 0, {7: "xid"}, {7: "committed"}, scanned_through=None)
+    assert holes[1] == "aborted"
+    blocked, chosen = publication_prefix([7], 0, holes)
+    assert blocked is False
+    assert chosen == [7]
+
+
+def test_claim_page_size_is_a_bound() -> None:
+    assert CLAIM_PAGE_SIZE >= 1
+    from consistency_persistence import outbox
+
+    source = outbox.__file__
+    text = __import__("pathlib").Path(source).read_text()
+    assert "LIMIT :limit" in text
+    assert 'FROM outbox_claims WHERE id > :after_id ORDER BY id"' not in text
 
 
 def test_committed_id_missing_from_the_snapshot_is_not_skipped() -> None:

@@ -38,8 +38,12 @@ function cookieFrom(response: Response): string {
   return pair;
 }
 
+function issueRequest(): Request {
+  return new Request("http://dashboard.test/app-data/replay-capability", { method: "POST" });
+}
+
 async function issue(): Promise<string> {
-  const response = await issueCapability();
+  const response = await issueCapability(issueRequest());
   return cookieFrom(response);
 }
 
@@ -84,7 +88,7 @@ describe("replay proxy authentication", () => {
   it("keeps the shared token out of capability and proxy responses", async () => {
     process.env.REPLAY_MUTATIONS_PUBLIC = "false";
     process.env.REPLAY_API_TOKEN = "proxy-token";
-    const issued = await issueCapability();
+    const issued = await issueCapability(issueRequest());
     const issuedBody = await issued.text();
     expect(issued.status).toBe(200);
     expect(issuedBody).not.toContain("proxy-token");

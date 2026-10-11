@@ -17,7 +17,7 @@ async function proxy(request: Request, path: string[]): Promise<Response> {
   }
   let capabilityId: string | null = null;
   let upstreamPath = path;
-  if (isReplayMutation(request.method, path)) {
+  if (request.method === "POST") {
     const gate = authorizeReplayMutation(request.headers.get("cookie"), path);
     if (!gate.ok) {
       return Response.json({ error: gate.error }, { status: gate.status });

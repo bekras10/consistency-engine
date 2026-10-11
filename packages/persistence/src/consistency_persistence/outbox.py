@@ -33,6 +33,13 @@ Delivery:
   it does not stall a contiguous committed prefix.
 
 ``created_at`` is the insert time, not the commit time, and is not a cursor.
+
+Retention deletes rows and claims at or below a consumed watermark. It never
+deletes an id above that watermark, and it refuses a watermark the commit-safe
+cursor has not reached. ``outbox_retention.pruned_through`` records the floor.
+A reader whose cursor is still below that floor gets ``(True, [])`` and must
+resync. Those ids are not reported as aborted holes, so a later committed id
+is not delivered as if the pruned prefix had been skipped.
 """
 
 from __future__ import annotations
@@ -49,6 +56,22 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 # before the detection transaction commits, so two detections can still commit
 # out of order. It does not stay held for the life of the detection write.
 _ALLOC_LOCK = 884422331
+# Every claim read is a page. A short page means the scan reached the end.
+CLAIM_PAGE_SIZE = 500
+_CLAIM_PAGE_SQL = """
+SELECT id, xid::text
+FROM outbox_claims
+WHERE id > :after_id
+ORDER BY id
+LIMIT :limit
+"""
+_CLAIM_STATUS_SQL = """
+SELECT id, pg_xact_status(CAST(xid AS xid8))
+FROM outbox_claims
+WHERE id > :after_id AND id <= :through
+ORDER BY id
+LIMIT :limit
+"""
 
 HoleState = Literal["aborted", "in progress", "committed", "unknown"]
 BeforeStatus = Callable[[], Awaitable[None]]
@@ -201,47 +224,102 @@ async def _visible_ids(session: AsyncSession, after_id: int, limit: int | None) 
     return [int(item) for item in result.scalars()]
 
 
+def holes_for_claims(
+    visible: Sequence[int],
+    after_id: int,
+    claims: Mapping[int, str],
+    statuses: Mapping[int, object],
+    *,
+    scanned_through: int | None,
+) -> dict[int, HoleState]:
+    """Hole states from one bounded claim window.
+
+    ``scanned_through is None`` means every claim above ``after_id`` was read.
+    A bounded window must not treat an id past ``scanned_through`` as aborted:
+    a later claim that was not loaded is not evidence that the id rolled back.
+    """
+    highest = scanned_through
+    if highest is None:
+        highest = max(claims) if claims else after_id
+    holes: dict[int, HoleState] = {}
+    for gap in _gap_ids(visible, after_id, highest):
+        if gap in claims:
+            holes[gap] = _hole_state(statuses.get(gap))
+        elif highest > gap:
+            holes[gap] = "aborted"
+        else:
+            holes[gap] = "unknown"
+    return holes
+
+
+async def _claim_page(session: AsyncSession, after_id: int) -> list[tuple[int, str]]:
+    rows = (
+        await session.execute(
+            text(_CLAIM_PAGE_SQL),
+            {"after_id": after_id, "limit": CLAIM_PAGE_SIZE},
+        )
+    ).all()
+    return [(int(row[0]), str(row[1])) for row in rows]
+
+
+async def _load_claims(
+    session: AsyncSession, after_id: int, cover_through: int
+) -> tuple[dict[int, str], int | None]:
+    """Claims above ``after_id`` until the table ends or ``cover_through`` is covered.
+
+    The second value is ``None`` when the scan is complete. Otherwise it is the
+    last id read, and higher claims were not loaded.
+    """
+    found: dict[int, str] = {}
+    cursor = after_id
+    while True:
+        rows = await _claim_page(session, cursor)
+        if not rows:
+            return found, None
+        for claim_id, xid in rows:
+            found[claim_id] = xid
+        cursor = rows[-1][0]
+        if len(rows) < CLAIM_PAGE_SIZE:
+            return found, None
+        if cursor >= cover_through:
+            return found, cursor
+
+
+async def _claim_statuses(session: AsyncSession, after_id: int, through: int) -> dict[int, object]:
+    live: dict[int, object] = {}
+    cursor = after_id
+    while cursor < through:
+        rows = (
+            await session.execute(
+                text(_CLAIM_STATUS_SQL),
+                {"after_id": cursor, "through": through, "limit": CLAIM_PAGE_SIZE},
+            )
+        ).all()
+        if not rows:
+            break
+        for row in rows:
+            live[int(row[0])] = row[1]
+        cursor = int(rows[-1][0])
+        if len(rows) < CLAIM_PAGE_SIZE:
+            break
+    return live
+
+
 async def _hole_states(
     session: AsyncSession,
     after_id: int,
     visible: Sequence[int],
     before_status: BeforeStatus | None,
 ) -> dict[int, HoleState]:
-    claim_rows = (
-        await session.execute(
-            text("SELECT id, xid::text FROM outbox_claims WHERE id > :after_id ORDER BY id"),
-            {"after_id": after_id},
-        )
-    ).all()
-    claims = {int(row[0]): str(row[1]) for row in claim_rows}
+    cover = max(visible) if visible else after_id
+    claims, scanned_through = await _load_claims(session, after_id, cover)
     if before_status is not None:
         await before_status()
-    highest_claim = max(claims) if claims else after_id
-    gaps = _gap_ids(visible, after_id, highest_claim)
-    live: dict[int, object] = {}
-    if claims:
-        status_rows = (
-            await session.execute(
-                text(
-                    """
-                    SELECT id, pg_xact_status(CAST(xid AS xid8))
-                    FROM outbox_claims
-                    WHERE id > :after_id
-                    """
-                ),
-                {"after_id": after_id},
-            )
-        ).all()
-        live = {int(row[0]): row[1] for row in status_rows}
-    holes: dict[int, HoleState] = {}
-    for gap in gaps:
-        if gap in claims:
-            holes[gap] = _hole_state(live.get(gap))
-        elif highest_claim > gap:
-            holes[gap] = "aborted"
-        else:
-            holes[gap] = "unknown"
-    return holes
+    through = scanned_through
+    if through is None:
+        through = max(claims) if claims else after_id
+    statuses = await _claim_statuses(session, after_id, through) if claims else {}
+    return holes_for_claims(visible, after_id, claims, statuses, scanned_through=scanned_through)
 
 
 async def _load_notes(session: AsyncSession, ids: Sequence[int]) -> list[OutboxNote]:
@@ -293,18 +371,73 @@ async def highest_outbox_id(session: AsyncSession) -> int:
     return raw
 
 
+async def pruned_through(session: AsyncSession) -> int:
+    """Highest outbox id retention has removed, or 0 when nothing has been pruned."""
+    raw = await session.scalar(
+        text("SELECT pruned_through FROM outbox_retention WHERE singleton = 1")
+    )
+    if raw is None:
+        return 0
+    if not isinstance(raw, int):
+        raise TypeError("outbox retention cursor was not an integer")
+    return raw
+
+
 async def contiguous_watermark(session: AsyncSession, after_id: int) -> int:
     """Highest id that can be acknowledged without skipping a live gap.
 
     The watermark and the caller's detection read share the session snapshot.
-    This does not load payloads and does not stop at a fixed row count.
+    Visible ids and claims are read in pages. A reader below the retention
+    floor starts at that floor: pruned ids are not reclassified as aborts.
     """
-    visible = await _visible_ids(session, after_id, None)
-    holes = await _hole_states(session, after_id, visible, None)
-    _blocked, chosen = publication_prefix(visible, after_id, holes)
-    if not chosen:
-        return after_id
-    return chosen[-1]
+    floor = await pruned_through(session)
+    cursor = after_id if after_id >= floor else floor
+    while True:
+        visible = await _visible_ids(session, cursor, CLAIM_PAGE_SIZE)
+        holes = await _hole_states(session, cursor, visible, None)
+        blocked, chosen = publication_prefix(visible, cursor, holes)
+        if not chosen:
+            return cursor
+        cursor = chosen[-1]
+        if blocked or len(visible) < CLAIM_PAGE_SIZE:
+            return cursor
+
+
+async def prune_consumed_outbox(session: AsyncSession, consumed_through: int) -> int:
+    """Delete outbox rows and claims at or below a consumed commit-safe watermark.
+
+    ``consumed_through`` must be between the current retention floor and
+    ``contiguous_watermark``. Ids above it stay, including their claims, so a
+    later ``pg_xact_status`` read still sees them. The sequence is not rewound.
+    """
+    if consumed_through < 0:
+        raise ValueError("consumed_through must be >= 0")
+    floor = await pruned_through(session)
+    if consumed_through < floor:
+        return floor
+    watermark = await contiguous_watermark(session, 0)
+    if consumed_through > watermark:
+        raise ValueError("refusing to prune past the commit-safe watermark")
+    await session.execute(
+        text("DELETE FROM notification_outbox WHERE id <= :consumed"),
+        {"consumed": consumed_through},
+    )
+    await session.execute(
+        text("DELETE FROM outbox_claims WHERE id <= :consumed"),
+        {"consumed": consumed_through},
+    )
+    await session.execute(
+        text(
+            """
+            INSERT INTO outbox_retention (singleton, pruned_through)
+            VALUES (1, :consumed)
+            ON CONFLICT (singleton) DO UPDATE
+            SET pruned_through = EXCLUDED.pruned_through
+            """
+        ),
+        {"consumed": consumed_through},
+    )
+    return consumed_through
 
 
 async def committed_notifications(
@@ -316,14 +449,20 @@ async def committed_notifications(
 ) -> tuple[bool, list[OutboxNote]]:
     """Return ``(blocked, notes)`` for the committed prefix above ``after_id``.
 
-    ``before_status`` runs after the outbox snapshot is taken and before
-    ``pg_xact_status`` is read. Tests use it to commit a writer in that gap.
-    Production passes none. The row snapshot is not read again afterwards, so
-    a commit during the gap cannot be mistaken for an abort, and it also
-    cannot appear inside this snapshot.
+    ``before_status`` runs after the outbox snapshot and the claim-id pages
+    are taken, and before ``pg_xact_status`` is read. Tests use it to commit a
+    writer in that gap. Production passes none. The row snapshot is not read
+    again afterwards, so a commit during the gap cannot be mistaken for an
+    abort, and it also cannot appear inside this snapshot.
+
+    A cursor below the retention floor returns ``(True, [])``. The caller
+    resyncs. The function does not hand back a later id as though the pruned
+    prefix were an aborted hole.
     """
     if limit < 1:
         return False, []
+    if after_id < await pruned_through(session):
+        return True, []
     visible = await _visible_ids(session, after_id, limit)
     holes = await _hole_states(session, after_id, visible, before_status)
     blocked, chosen = publication_prefix(visible, after_id, holes)
