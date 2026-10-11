@@ -759,3 +759,39 @@ The stack was left running as project `consistency-deploy`. Stop it with `docker
 Phase 15 commit `934a401` was pushed to `main`. GitHub Actions run
 https://github.com/bekras10/consistency-engine/actions/runs/38167467957 finished with conclusion `success`.
 
+## Audit fixes before Phase 16 — 2026-10-11
+
+Regression tests were added first and failed, then the code was fixed. Golden expected values in `fixtures/golden` and `tests/golden` were not edited. No Kalshi endpoint was called. Nothing was deployed. Phase 16 documentation was not in this commit. Phase 17 was not started.
+
+| Issue | Regression | Pre-fix failure | Design |
+|---|---|---|---|
+| Completed demo ingested again | `test_completed_fingerprint_is_not_ingested_again` | Second session id was `ses-668691cd8bcb51ca3217147f-2` | A deterministic fingerprint that already has a `completed` session sets `skip_ingest`. The completed row is not modified |
+| Failed session duplicated | `test_failed_mid_journal_resumes_without_duplicate_detection_ids` | Resume allocated `ses-66a1064faf0a78e559256d33-2` | `running`, `interrupted`, and `failed` resume the same id from the checkpoint. Detection ids are not duplicated |
+| Manual reseed | `test_reseed_opens_a_new_session` | This case already passed, because the bug opened a second session | `RESEED_SESSION=true` or `python -m consistency_worker run --reseed` allocates a new id. Default is false |
+| Retention never ran | `test_maintenance_prunes_while_ingestion_is_idle` | Process exit 2, unknown command `maintain` | `python -m consistency_worker maintain` runs the retention loop after ingestion is idle. The worker entrypoint starts it beside ingestion and exits non-zero if either process dies |
+| Replay issuance map | `drops expired one-time clients and refuses a client past the map cap` | `issuedClientCount is not a function` | Expired client stamps are dropped. `REPLAY_CAPABILITY_MAX_CLIENTS` default 4096. A new identity past the cap is not stored |
+| Forwarded replay identity | `ignores X-Forwarded-For unless the TCP peer is a trusted proxy` | Untrusted peers were keyed as `203.0.113.5` and `203.0.113.99` | The header is ignored unless `TRUSTED_PROXY_COUNT` is at least 1 and the peer is an exact member of `TRUSTED_PROXIES`. A route with no socket stays `direct` |
+| Production npm count | `a production vulnerability count above zero fails without a GHSA id` | `evaluate` returned no errors | `metadata.vulnerabilities.total` above zero fails |
+| Unknown advisory shape | `a finding with no GHSA id still counts as an unknown advisory format` | The same empty error list | A finding that does not resolve to a GHSA id fails. An allowlisted id that the report no longer contains still fails |
+| Healthcheck was a ping | `test_worker_healthcheck_reports_lifecycle_not_only_postgres`; `test_worker_entrypoint_schedules_maintenance_after_ingestion`; `test_worker_health_distinguishes_completed_running_and_failed` | Compose healthcheck did not call `consistency_worker health`. The entrypoint contained `sleep infinity`. `consistency_worker.health` was missing | `completed`, `running`, and `interrupted` print that word and exit 0. `failed` prints `failed` and exits 1. No row is `starting` / 1. A database error is `unhealthy` / 1 |
+| Health against Postgres | `test_report_health_distinguishes_completed_running_and_failed` | Covered by the missing module above | The health command reads the latest `ingestion_sessions` row |
+
+`test_overlapping_prunes_keep_a_monotonic_floor` failed once during the full suite and once in isolation (`assert 10 == 30`) when the lower prune committed first. The stored-floor assertion was not what failed. The test now holds the retention lock in the higher prune until the lower prune is waiting, then keeps the same assertions. Five isolated repeats passed. The lock and `GREATEST` behavior were not changed.
+
+Local verification, Docker Postgres 16.15 on port 5433: `make lint` clean, `make typecheck` clean (89 source files). `make test` 476 passed in 114.66s. Suites: unit 361, golden 34, property 24, replay 14, integration 43. Frontend: eslint clean, `tsc --noEmit` clean, Vitest 21 passed (6 files), `next build` succeeded (Next.js 15.5.27). `node --test scripts/npm_audit_lib.test.mjs` 4 passed. `node scripts/check_npm_audit.mjs` printed production vulnerability count 0 and the two allowlisted ids `GHSA-vfj7-8cjw-p6xm` and `GHSA-rj75-hqrm-r3gf`. `scripts/e2e.sh` with `E2E_SKIP_COMPOSE=1`, `POSTGRES_PORT=5433`, and `WEB_PORT=3001` printed `Replay proxy: 401 without a token; viewers viewer-8fd72542cac94868bcc4412587bbd7df and viewer-02e5044c79854a28ba46aa9e9597404e seek to cursors 0 and 12277.`, then Playwright `e2e/dashboard.spec.ts` 1 passed (21.2s) and `e2e/disconnected.spec.ts` 1 passed (222ms), then `Playwright passed, including the disconnected page.`
+
+`bash scripts/compose_smoke.sh` on project `consistency-smoke-local-48362` printed `compose smoke passed: 12 detections, 1 completed session, restart kept the same ids` and exited 0. Postgres was not published. The project was removed by the script's own teardown. `consistency-deploy` was left running.
+
+Part A commit `dee6e4d` was pushed to `main`. GitHub Actions run
+https://github.com/bekras10/consistency-engine/actions/runs/38171534498 finished with conclusion `success`. Jobs: backend, frontend, e2e, and compose. The compose smoke job succeeded.
+
+The inconsistency-workload end-to-end median of 2281.125 ms was not remeasured.
+
+## Phase 16 — documentation — 2026-10-11
+
+`README.md` was rewritten from the implementation: problem statement, architecture diagram, mathematical model, order-book and fee rules, detection lifecycle, synthetic and replay behavior, the commands in the Makefile and `docs/deployment.md`, test entry points, the benchmark tables already in `docs/benchmarks.md`, security, data sources, limitations, and the independent-project disclosure. No screenshot was added. Phase 17 was not started. Nothing was deployed to a public host.
+
+`docs/limitations.md` was added. It did not exist. The opening of `docs/architecture.md` no longer says the API is health-only and that there is no dashboard. The maintenance sentence in that file names the maintenance process. A non-deterministic session is described as a new session id, which is what `DatabaseSessionStore` does.
+
+Benchmark numbers were not remeasured. Golden expected values were not edited.
+

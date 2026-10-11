@@ -1,8 +1,9 @@
 # Architecture
 
-Milestone 2 runs one process, `consistency_worker`, from a synthetic or replay source through
-books and the detection engine into PostgreSQL. The API process only answers health checks.
-There is no dashboard and no public detection API yet.
+The worker reads a synthetic or replay source, rebuilds books, and writes detections to
+PostgreSQL. A separate API process reads that database. The dashboard polls a gateway.
+`GET /api/v1/stream` tails the notification outbox. The diagram below is the worker path.
+The outbox, stream, and dashboard are in the later sections.
 
 ```mermaid
 flowchart LR
@@ -65,8 +66,7 @@ A deterministic session (`synthetic` or `replay`) that stops mid-way resumes fro
 checkpoint on the same session id: journal and detections are reconciled to that checkpoint.
 Reconciliation writes the certificate stored on the checkpointed detection, so a later update
 cannot leave a wiped or mismatched `certificate_json`.
-A non-deterministic session invalidates open detections with `SERVICE_RESTART` and starts a
-new session id.
+A non-deterministic session is not resumed. Startup allocates a new session id.
 
 ## Persistence
 
@@ -156,7 +156,7 @@ resynchronization snapshot when the tail is uncertain. SSE `id:` is the outbox i
 Reconnecting with `Last-Event-ID` replays that boundary event so a client can apply it
 idempotently. If `Last-Event-ID` is greater than every reserved or committed outbox id,
 the stream sends `resync` immediately instead of waiting for an id the restored database
-will not produce. The worker retention loop deletes a committed prefix down to
+will not produce. The maintenance process deletes a committed prefix down to
 `contiguous_watermark - OUTBOX_RETENTION_KEEP` (default keep 10000) under an advisory
 lock, and the stored floor only moves forward. A cursor at or below that floor
 full-resyncs. A cursor still inside the retained suffix does not lose events.

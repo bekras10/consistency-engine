@@ -11,8 +11,7 @@ Session outcomes:
   session resumes the same way. A fingerprint that already ``completed`` is not ingested again
   unless ``RESEED_SESSION`` is set;
 * live source stopped: open detections are closed and the session is ``stopped``. A live session
-  cannot be resumed; a store finding one still ``running`` at startup (crash) invalidates its open
-  detections with ``SERVICE_RESTART``.
+  is not resumed. Startup allocates a new session id.
 """
 
 from __future__ import annotations
