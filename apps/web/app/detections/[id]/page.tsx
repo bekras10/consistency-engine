@@ -90,6 +90,7 @@ export default async function DetectionDetailPage({ params }: { params: Promise<
   const closingCertificate = data.closing_certificate && typeof data.closing_certificate === "object" ? (data.closing_certificate as Record<string, unknown>) : null;
   const closed = data.executable === false;
   const quoteLabel = data.quote_label ?? (closed ? "Last qualifying quote" : "Open quote");
+  const certified = data.proof_status === "certified";
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -213,21 +214,27 @@ export default async function DetectionDetailPage({ params }: { params: Promise<
             ))}
           </tbody>
         </table>
-        <p data-testid="certificate-hash" className="mt-2 font-mono text-xs">certificate {data.certificate_hash}</p>
-        {data.proof_status === "uncertified" ? (
-          <p data-testid="proof-uncertified" className="mt-2 text-sm">
-            Uncertified. The stored hash is not a verified match for the stored
-            document, and the journal did not reconstruct one.
-          </p>
+        {certified ? (
+          <p data-testid="certificate-hash" className="mt-2 font-mono text-xs">certificate {data.certificate_hash}</p>
         ) : (
+          <p data-testid="certificate-hash" className="mt-2 font-mono text-xs">
+            stored hash {data.certificate_hash} (not a verified proof)
+          </p>
+        )}
+        {certified ? (
           <p className="text-xs text-[#9aa0a6]">
             Qualifying certificate. Its hash is SHA-256 of this proof, not of the closing evaluation.
           </p>
+        ) : (
+          <p data-testid="proof-uncertified" className="mt-2 text-sm">
+            Not a proof. This row is uncertified. The stored bytes are kept for
+            investigation and are not a verified certificate.
+          </p>
         )}
       </section>
-      {section("Qualifying walked levels and evaluation", certificate?.evaluation)}
-      {section("Fees in the qualifying certificate", certificate?.fees ?? certificate?.fee_schedules)}
-      {section("Timing and sequence", certificate?.timing)}
+      {certified ? section("Qualifying walked levels and evaluation", certificate?.evaluation) : null}
+      {certified ? section("Fees in the qualifying certificate", certificate?.fees ?? certificate?.fee_schedules) : null}
+      {certified ? section("Timing and sequence", certificate?.timing) : null}
       <section data-testid="closing-condition">
         <h2 className="text-sm font-medium">Closing condition</h2>
         <p className="text-sm">

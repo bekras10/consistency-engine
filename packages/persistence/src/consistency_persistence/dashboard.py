@@ -187,6 +187,7 @@ def _detection_item(
         "max_deviation": figures["max_deviation"],
         "depth_supported_quantity": figures["depth_supported_quantity"],
         "max_capacity": figures["max_capacity"],
+        "proof_status": row.proof_status,
     }
 
 

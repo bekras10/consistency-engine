@@ -7,9 +7,14 @@ Create Date: 2026-10-11
 Explicit DDL. This revision does not call create_all.
 
 Rows whose certificate JSON already hashes to the stored hash are unchanged.
-A mismatched qualifying document is replaced only by a proof reconstructed from
-a checkpoint whose state digest verifies, and the hash is then the hash of those
-bytes. Anything that cannot be reconstructed is marked uncertified and kept.
+A mismatched qualifying document is replaced only when a journal replay or a
+verified checkpoint reproduces that same stored hash and agrees with the row's
+classification and any stored metrics, legs, and scenarios. The original hash
+is not rewritten. Anything that cannot be linked is marked uncertified and kept.
+
+Each affected detection is one savepoint. A failure quarantines that row and
+does not roll back detections already certified in earlier savepoints, and it
+does not abort the migration. Checkpoints are paged per affected session.
 """
 
 from __future__ import annotations

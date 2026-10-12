@@ -16,7 +16,8 @@ configuration does not call Kalshi. A synthetic detection tests this pipeline. I
 not a measurement of a live market.
 
 This is an independent open-source project. It is not an official Kalshi product and
-it is not endorsed by Kalshi.
+it is not endorsed by Kalshi. The delivery note for this build is
+[docs/DELIVERY.md](docs/DELIVERY.md).
 
 ![Synthetic overview of the Compose dashboard](docs/demo/overview.png)
 
@@ -350,3 +351,4 @@ Not in the current tree:
 - [Data contracts](docs/data-contracts.md)
 - [Progress](PROGRESS.md)
 - [Demonstration](docs/demo.md)
+- [Delivery](docs/DELIVERY.md)

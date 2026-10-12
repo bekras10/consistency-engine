@@ -30,7 +30,7 @@ account system.
 | `GET /api/v1/relationships/{id}` | Relationship document, members, and provenance. |
 | `GET /api/v1/detections` | Same filters as the dashboard query (classification, relationship type, time range, `min_net_edge`, `min_quantity`, market, sort). `limit` and `offset` page the filtered list. |
 | `GET /api/v1/detections/{id}` | Stored detection, legs, scenarios, and certificate. |
-| `GET /api/v1/detections/{id}/proof` | Certificate, legs, scenarios, and the technical report. |
+| `GET /api/v1/detections/{id}/proof` | Certified proof only. `proof_status` is `certified` and the body is the certificate, legs, scenarios, and technical report. An `uncertified` row is `403 {"error":"uncertified"}` with no certificate. |
 | `GET /api/v1/replay/sessions` | Recorded ingestion sessions. |
 | `GET /api/v1/replay/sessions/{id}` | A recording summary, or the live snapshot of a viewer id opened in this process. |
 | `GET /api/v1/stream` | Server-sent events. See below. |

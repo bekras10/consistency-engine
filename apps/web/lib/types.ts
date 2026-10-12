@@ -47,6 +47,7 @@ export type DetectionRow = {
   max_deviation: string | null;
   depth_supported_quantity: string | null;
   max_capacity: string | null;
+  proof_status?: string;
 };
 
 export type Overview = {

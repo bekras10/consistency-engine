@@ -47,6 +47,10 @@ def test_assess_health_separates_session_status_from_maintenance_freshness() -> 
         stale_after_s=30.0,
         retention_state="running",
         process_alive=True,
+        last_success=fresh,
+        started_at=now - 10_000,
+        success_max_age_s=7200.0,
+        startup_grace_s=120.0,
     ) == ("completed", 0)
     assert assess_health(
         "completed",
@@ -119,7 +123,48 @@ def test_assess_health_separates_session_status_from_maintenance_freshness() -> 
         process_alive=True,
         consecutive_failures=3,
         max_failures=3,
+        last_success=fresh,
+        success_max_age_s=7200.0,
     ) == ("completed", 0)
+    assert assess_health(
+        "completed",
+        expect_maintenance=True,
+        heartbeat_epoch=fresh,
+        now=now,
+        stale_after_s=30.0,
+        retention_state="running",
+        process_alive=True,
+        last_success=now - 10_000,
+        started_at=now - 10_000,
+        success_max_age_s=60.0,
+        startup_grace_s=30.0,
+    ) == ("unhealthy", 1)
+    assert assess_health(
+        "completed",
+        expect_maintenance=True,
+        heartbeat_epoch=fresh,
+        now=now,
+        stale_after_s=30.0,
+        retention_state="running",
+        process_alive=True,
+        last_success=None,
+        started_at=fresh,
+        success_max_age_s=60.0,
+        startup_grace_s=120.0,
+    ) == ("completed", 0)
+    assert assess_health(
+        "completed",
+        expect_maintenance=True,
+        heartbeat_epoch=fresh,
+        now=now,
+        stale_after_s=30.0,
+        retention_state="running",
+        process_alive=True,
+        last_success=None,
+        started_at=now - 10_000,
+        success_max_age_s=60.0,
+        startup_grace_s=30.0,
+    ) == ("unhealthy", 1)
 
 
 def test_worker_entrypoint_expects_a_maintenance_heartbeat() -> None:

@@ -14,6 +14,7 @@ const columns: { key: string; label: string }[] = [
   { key: "quantity", label: "Depth qty" },
   { key: "duration", label: "Duration" },
   { key: "classification", label: "Classification" },
+  { key: "proof", label: "Proof" },
 ];
 
 export function DetectionTable({
@@ -30,7 +31,7 @@ export function DetectionTable({
           <tr>
             {columns.map((column) => (
               <th key={column.key} className="border-b border-[#2c3136] px-2 py-2 font-medium">
-                {sortHref ? (
+                {sortHref && column.key !== "proof" ? (
                   <Link href={sortHref(column.key)} className="hover:text-[#e8eaed]">
                     {column.label}
                   </Link>
@@ -77,6 +78,9 @@ export function DetectionTable({
               </td>
               <td className="px-2 py-1.5 font-mono">{row.duration_ms} ms</td>
               <td className="px-2 py-1.5">{row.classification}</td>
+              <td className="px-2 py-1.5" data-testid="proof-status">
+                {row.proof_status === "certified" ? "certified" : "not a proof"}
+              </td>
             </tr>
           ))}
         </tbody>

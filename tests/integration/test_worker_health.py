@@ -74,7 +74,15 @@ def _maintenance(
 ) -> None:
     process = os.getpid() if pid is None else pid
     if attest:
-        path.write_text(f"{epoch:.6f}\nretention={retention}\npid={process}\n", encoding="utf-8")
+        # A live retention task that just succeeded. The epoch is also the
+        # last success, so a fresh heartbeat stays inside the success window
+        # and a stale epoch still fails the heartbeat-age check first.
+        path.write_text(
+            f"{epoch:.6f}\nretention={retention}\npid={process}\n"
+            f"consecutive_failures=0\nlast_success={epoch:.6f}\n"
+            f"started_at={epoch:.6f}\n",
+            encoding="utf-8",
+        )
     else:
         path.write_text(f"{epoch:.6f}\n", encoding="utf-8")
     monkeypatch.setenv("EXPECT_MAINTENANCE", "1")

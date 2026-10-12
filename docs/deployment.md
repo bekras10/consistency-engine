@@ -116,16 +116,23 @@ the maintenance process is alive.
 The worker service sets `EXPECT_MAINTENANCE=1`. `maintain` writes
 `MAINTENANCE_HEARTBEAT_PATH` (default `/tmp/consistency-worker/heartbeat`)
 every `MAINTENANCE_HEARTBEAT_S` seconds (default 5). The file records
-`consecutive_failures` and `last_success` for the retention cycle. If that
-file is missing or older than `MAINTENANCE_STALE_S` (default 30), health
-prints `unhealthy` and exits 1 even when the last ingestion session is
-`completed`. The same word and exit are used when consecutive failed cycles
-exceed `MAINTENANCE_MAX_FAILURES` (default 3), including when the process is
-alive and the timestamp is fresh. A cycle that finishes resets the count and
-writes `last_success`. A host `health` command that leaves
-`EXPECT_MAINTENANCE` unset does not require the file. A `failed` ingestion
-session exits 1 either way. A fresh heartbeat does not turn a failed session
-into a healthy one.
+`consecutive_failures`, `last_success`, and `started_at` for the retention
+cycle. If that file is missing or older than `MAINTENANCE_STALE_S` (default
+30), health prints `unhealthy` and exits 1 even when the last ingestion
+session is `completed`. The same word and exit are used when consecutive
+failed cycles exceed `MAINTENANCE_MAX_FAILURES` (default 3), including when
+the process is alive and the timestamp is fresh. A cycle that finishes resets
+the count and writes `last_success`. Health is also unhealthy when that
+success is older than `MAINTENANCE_SUCCESS_MAX_AGE_S` (default 7200 seconds),
+even if the process is alive and the heartbeat timestamp is fresh. Before the
+first success, `MAINTENANCE_STARTUP_GRACE_S` applies. When it is unset, the
+grace is `RETENTION_INTERVAL_S` plus 60 seconds, because the retention task
+sleeps for one interval before the first cycle. `.env.example` sets the grace
+to 3660, which matches the default interval of 3600. A `last_success` that is
+already older than the max age is unhealthy during that grace window. A host
+`health` command that leaves `EXPECT_MAINTENANCE` unset does not require the
+file. A `failed` ingestion session exits 1 either way. A fresh heartbeat does
+not turn a failed session into a healthy one.
 
 | Status | Printed word | Exit | Meaning |
 |---|---|---|---|
@@ -134,6 +141,7 @@ into a healthy one.
 | `interrupted`, heartbeat fresh or not required | `interrupted` | 0 | The journal stopped early. The next start resumes it |
 | `completed` or `running`, maintenance stale | `unhealthy` | 1 | The entrypoint expects maintenance, and the heartbeat is missing or old |
 | `completed` or `running`, retention failures above the threshold | `unhealthy` | 1 | The process is alive and the timestamp is fresh, and `consecutive_failures` is greater than `MAINTENANCE_MAX_FAILURES` (default 3) |
+| `completed` or `running`, last success too old | `unhealthy` | 1 | The process is alive and the timestamp is fresh, and `last_success` is older than `MAINTENANCE_SUCCESS_MAX_AGE_S` (default 7200). Startup grace does not cover a stale success |
 | `failed` | `failed` | 1 | Processing failed. The container is unhealthy |
 | no row yet | `starting` | 1 | The session has not been opened |
 | database error | `unhealthy` | 1 | The status could not be read |

@@ -279,8 +279,11 @@ async def detection(request: Request, detection_id: str) -> dict[str, object]:
 @router.get("/api/v1/detections/{detection_id}/proof")
 async def detection_proof(request: Request, detection_id: str) -> dict[str, object]:
     row = await detection(request, detection_id)
+    if row.get("proof_status") != "certified":
+        raise HTTPException(status_code=403, detail="uncertified")
     return {
         "detection_id": detection_id,
+        "proof_status": "certified",
         "certificate_hash": row.get("certificate_hash"),
         "certificate": row.get("certificate"),
         "legs": row.get("legs"),
@@ -490,6 +493,7 @@ async def _detection_snapshot(session: AsyncSession) -> list[dict[str, object]]:
                 DetectionRow.status,
                 DetectionRow.certificate_hash,
                 DetectionRow.session_id,
+                DetectionRow.proof_status,
             ).order_by(DetectionRow.detection_id)
         )
     ).all()
@@ -500,6 +504,7 @@ async def _detection_snapshot(session: AsyncSession) -> list[dict[str, object]]:
             "status": str(row[2]),
             "certificate_hash": str(row[3]),
             "session_id": str(row[4]),
+            "proof_status": str(row[5]),
         }
         for row in rows
     ]

@@ -333,6 +333,60 @@ def _failure_count(text: str) -> int:
     return 0
 
 
+async def test_stale_retention_success_is_unhealthy_while_the_process_is_alive(
+    db: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A live retention process with an old last_success is not healthy.
+
+    Startup grace does not excuse a success timestamp that is already older
+    than the configured gap.
+    """
+    store = await _completed(db, "retention-stale")
+    heartbeat = tmp_path / "heartbeat"
+    proc = subprocess.Popen(
+        ["sleep", "30"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        now = time.time()
+        heartbeat.write_text(
+            (
+                f"{now:.6f}\nretention=running\npid={proc.pid}\n"
+                "consecutive_failures=0\n"
+                f"last_success={now - 10_000:.6f}\n"
+                f"started_at={now - 10_000:.6f}\n"
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("EXPECT_MAINTENANCE", "1")
+        monkeypatch.setenv("MAINTENANCE_HEARTBEAT_PATH", str(heartbeat))
+        monkeypatch.setenv("MAINTENANCE_STALE_S", "30")
+        monkeypatch.setenv("MAINTENANCE_MAX_FAILURES", "3")
+        monkeypatch.setenv("MAINTENANCE_SUCCESS_MAX_AGE_S", "60")
+        monkeypatch.setenv("MAINTENANCE_STARTUP_GRACE_S", "30")
+        from consistency_worker.health import report_health
+
+        assert proc.poll() is None
+        assert await report_health(db) == ("unhealthy", 1)
+
+        heartbeat.write_text(
+            (
+                f"{now:.6f}\nretention=running\npid={proc.pid}\n"
+                "consecutive_failures=0\n"
+                f"last_success={now - 1:.6f}\n"
+                f"started_at={now - 10_000:.6f}\n"
+            ),
+            encoding="utf-8",
+        )
+        assert await report_health(db) == ("completed", 0)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
+        await store.aclose()
+
+
 async def test_live_maintenance_with_completed_session_stays_healthy(
     db: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

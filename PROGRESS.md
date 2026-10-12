@@ -1089,3 +1089,66 @@ https://github.com/bekras10/consistency-engine/actions/runs/38186578881 finished
 with conclusion `success`. Jobs: backend (4m29s), frontend (1m22s), e2e
 (2m37s), and compose (2m20s, Compose smoke succeeded).
 
+## Phase 20 — delivery closeout — 2026-10-11
+
+No new product phase. The synthetic pipeline and the recordings stay. The
+Kalshi connector was not enabled and nothing was deployed to a public host.
+The delivery note is `docs/DELIVERY.md`.
+
+### Audit fixes
+
+| Issue | Regression | Pre-fix failure | Design |
+|---|---|---|---|
+| Uncertified proof served as a proof | `test_uncertified_proof_is_refused_on_the_proof_list_and_resync` | `KeyError: 'proof_status'` on the detection list. The proof route returned the stored document with no status | `GET /api/v1/detections/{id}/proof` is `403` `{"error":"uncertified"}` unless `proof_status` is `certified`. Listings and SSE resync snapshots include `proof_status` and omit the certificate. The dashboard labels anything else "not a proof" and does not render the certificate sections |
+| Historical recovery certified a different checkpoint | `test_upgrade_recovers_or_quarantines_pre_0005_mismatched_certificate` (`det-audit-rehash`); `test_earlier_checkpoint_is_not_certified_as_the_final_proof` | `det-audit-rehash` was `certified` after the hash was rewritten. An earlier checkpoint was accepted as the final proof | Certify only when journal replay, or a verified checkpoint of that same observation, reproduces the stored hash and agrees with classification and any stored metrics, legs, and scenarios. Otherwise `uncertified`, and the hash is not rewritten. `test_journal_replay_restores_the_final_quote_not_the_earlier_checkpoint` restores the final quote when the replay hash matches |
+| Maintenance freshness ignored the age of `last_success` | `test_stale_retention_success_is_unhealthy_while_the_process_is_alive` | `assert ('completed', 0) == ('unhealthy', 1)` while the process was alive and `last_success` was old | `MAINTENANCE_SUCCESS_MAX_AGE_S` default 7200. `MAINTENANCE_STARTUP_GRACE_S` defaults to `RETENTION_INTERVAL_S` + 60. A stale success is unhealthy during grace. A recent success stays healthy |
+| Upgrade loaded every checkpoint | `test_unrelated_checkpoints_are_not_loaded_to_repair_one_detection`; `test_one_detection_failure_does_not_undo_an_earlier_certified_repair` | The second test raised `RuntimeError: injected repair failure` and aborted the migration. Checkpoint queries were not limited to the affected session | Audit only mismatched or missing proofs. Checkpoints are paged for one affected session. Each detection is a savepoint. A failure quarantines that row and leaves earlier certified repairs |
+
+`det-audit-recover` stays certified without replacing the qualifying hash.
+`det-audit-quarantine` and `det-audit-rehash` stay uncertified with their
+original hashes. `test_completed_session_with_fresh_maintenance_is_healthy`
+now writes a recent `last_success` on the attested heartbeat; the assertion
+is still `("completed", 0)`.
+
+### Verification
+
+Host Postgres `127.0.0.1:5433`. Port 5432 was not modified.
+
+`make lint` clean. `make typecheck` clean, 90 source files. `make test` 514
+passed, 0 failed, in 126.54s. Suites: unit 366, golden 34, property 24, replay
+16, integration 74. Golden expected values were not edited. Frontend eslint
+clean, `tsc --noEmit` clean, Vitest 22 passed (7 files).
+`node --test scripts/npm_audit_lib.test.mjs` 4 passed.
+`node scripts/check_npm_audit.mjs` printed the two allowlisted advisories
+`GHSA-vfj7-8cjw-p6xm` and `GHSA-rj75-hqrm-r3gf`, production count 0, exit 0.
+`uvx pip-audit` on the frozen export printed `No known vulnerabilities found`
+and exited 0.
+
+`scripts/e2e.sh` with `E2E_SKIP_COMPOSE=1`, `POSTGRES_PORT=5433`,
+`WEB_PORT=3100` printed Playwright passed, including the disconnected page.
+`e2e/dashboard.spec.ts` 1 passed (14.5s). `e2e/disconnected.spec.ts` 1 passed
+(124ms). `test_upgrade_downgrade_upgrade` passed inside the 514. Head is
+`0006_certificate_audit`.
+
+`bash scripts/compose_smoke.sh` on project `consistency-smoke-local-92573`
+printed the qualifying hash match for
+`sha256:0240383b5da7dea8aeb28ce478bd6e9655c5aa31468692fe1b938e0ebfb107fd`,
+replay cursor `981/12277` for `det-f26eee89fc522826ab5d90f1`, and
+`compose smoke passed: 12 detections, 1 completed session, restart kept the same ids`.
+
+`ffprobe` still reports `docs/demo/demo.webm` at 44.760000 s (4,290,463 bytes)
+and `docs/demo/demo-short.webm` at 24.440000 s (3,142,371 bytes). The GIF
+durations are 44.840000 s and 24.510000 s. The files were not re-recorded.
+SHA-256 of the stored JSON on the Compose demo database matched both stored
+hashes for `det-f26eee89fc522826ab5d90f1` (qualifying 14291 bytes, closing
+8281 bytes). `proof_status` was `certified`.
+
+### Residual risks
+
+Uncertified rows remain stored. Replay cursors are still in the gateway
+process. The two development npm advisories stay allowlisted. The Kalshi
+connector is still a disabled skeleton. Three retention failures at the
+default threshold stay healthy; the fourth is unhealthy. A `last_success`
+older than 7200 seconds is unhealthy. Downgrade of `0006_certificate_audit`
+drops `proof_status`. The 2281.125 ms end-to-end median was not remeasured.
+

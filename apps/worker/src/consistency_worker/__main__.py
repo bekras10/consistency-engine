@@ -40,6 +40,7 @@ from consistency_worker import logs
 from consistency_worker.health import (
     heartbeat_interval_s,
     heartbeat_path,
+    note_maintenance_start,
     note_retention_failure,
     note_retention_success,
     report_health,
@@ -147,6 +148,7 @@ async def _maintain(settings: Settings) -> int:
         return 2
     stop = asyncio.Event()
     _signals(stop)
+    note_maintenance_start()
     store = DatabaseSessionStore(settings)
     try:
         await store.ping()
