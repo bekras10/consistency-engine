@@ -163,3 +163,11 @@ the fourth is unhealthy. A successful cycle older than
 the process is alive. Downgrade of `0006_certificate_audit` drops
 `proof_status` and does not undo a repaired certificate. The 2281.125 ms
 end-to-end median was not remeasured.
+
+GitHub Actions run
+https://github.com/bekras10/consistency-engine/actions/runs/38189685534
+finished with conclusion `success` on `c2a74f8` after a rerun of the backend
+job. The first attempt failed while pulling the Postgres image
+(`toomanyrequests: Data limit exceeded`) and did not run tests. The rerun's
+backend job passed, including migrations up/down/up and integration tests.
+Frontend, e2e, and Compose smoke passed on the first attempt.
