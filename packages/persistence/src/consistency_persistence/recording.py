@@ -216,16 +216,25 @@ class DetectionWriter:
 
 
 def _require_proof_hash(rec: DetectionRecord) -> None:
-    """The qualifying JSON and its hash are one snapshot. A close must not split them."""
+    """Refuse a write whose hash and certificate bytes are not the same snapshot.
+
+    A new qualifying detection has no row until both the JSON and its SHA-256 are
+    present and equal. An update that fails this check raises before any column
+    changes, so the transaction rolls the whole batch back.
+    """
     if rec.certificate_json is None:
-        return
+        raise ValueError(f"{rec.detection_id} qualifying certificate JSON is missing")
     digest = "sha256:" + hashlib.sha256(rec.certificate_json.encode()).hexdigest()
     if digest != rec.certificate_hash:
         raise ValueError(f"{rec.detection_id} certificate hash does not match certificate JSON")
-    if rec.closing_certificate_json is None:
+    closing_json = rec.closing_certificate_json
+    closing_hash = rec.closing_certificate_hash
+    if closing_json is None and closing_hash is None:
         return
-    closing = "sha256:" + hashlib.sha256(rec.closing_certificate_json.encode()).hexdigest()
-    if closing != rec.closing_certificate_hash:
+    if closing_json is None or closing_hash is None:
+        raise ValueError(f"{rec.detection_id} closing certificate is missing half of its pair")
+    closing = "sha256:" + hashlib.sha256(closing_json.encode()).hexdigest()
+    if closing != closing_hash:
         raise ValueError(f"{rec.detection_id} closing certificate hash does not match its JSON")
 
 
@@ -243,8 +252,6 @@ async def _apply_event(session: AsyncSession, ev: DetectionEvent) -> None:
     else:
         previous = existing.certificate_json
         for key, value in values.items():
-            if key == "certificate_json" and value is None:
-                continue
             if key == "certificate_version" and value is None:
                 continue
             setattr(existing, key, value)
@@ -349,6 +356,7 @@ def _detection_values(rec: DetectionRecord) -> dict[str, Any]:
         "closing_classification": closing,
         "closing_certificate_hash": rec.closing_certificate_hash,
         "closing_certificate_json": rec.closing_certificate_json,
+        "proof_status": "certified",
         "record_json": rec.model_dump(mode="json"),
     }
 

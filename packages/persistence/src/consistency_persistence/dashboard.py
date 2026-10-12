@@ -292,6 +292,7 @@ def technical_report(item: dict[str, object], certificate_json: str | None) -> s
         f"closing_classification: {item.get('closing_classification')}",
         f"closing_certificate_hash: {item.get('closing_certificate_hash')}",
         f"close_reason: {item.get('close_reason')}",
+        f"proof_status: {item.get('proof_status')}",
         f"certificate_hash: {item.get('certificate_hash')}",
         "",
         "certificate_json:",
@@ -707,6 +708,9 @@ async def list_detections(
             )
         )
     rows = (await session.execute(stmt)).scalars().all()
+    # Facet options ignore the classification predicate so a filtered page can
+    # still offer every class that exists in the table.
+    class_rows = (await session.execute(select(DetectionRow.classification).distinct())).scalars()
     types = await _relationship_types(session)
     items: list[dict[str, object]] = []
     for row in rows:
@@ -727,7 +731,7 @@ async def list_detections(
         "truncated": offset + len(page) < len(ordered),
         "limit": limit,
         "offset": offset,
-        "classifications": sorted({row.classification for row in rows}),
+        "classifications": sorted({item for item in class_rows if item}),
         "relationship_types": sorted(set(types.values())),
     }
 
@@ -743,6 +747,7 @@ async def get_detection(session: AsyncSession, detection_id: str) -> dict[str, o
     item["executable"] = executable
     item["quote_label"] = "Open quote" if executable else "Last qualifying quote"
     item["certificate_hash"] = row.certificate_hash
+    item["proof_status"] = row.proof_status
     item["certificate_version"] = row.certificate_version
     item["closing_classification"] = row.closing_classification
     item["closing_certificate_hash"] = row.closing_certificate_hash

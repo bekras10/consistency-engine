@@ -31,6 +31,7 @@ from consistency_persistence.recording import (
     CheckpointWriter,
     DetectionWriter,
     VersionStamp,
+    _require_proof_hash,
     latest_checkpoint,
     replace_certificate_projection,
 )
@@ -49,9 +50,7 @@ from consistency_persistence.retention import (
 )
 from consistency_persistence.schema import (
     DataSourceRow,
-    DetectionLegRow,
     DetectionRow,
-    DetectionScenarioRow,
     IngestionSessionRow,
     OrderbookSnapshotRow,
     OrderbookUpdateRow,
@@ -431,6 +430,7 @@ async def _reconcile(session: AsyncSession, session_id: str, checkpoint: Checkpo
         stmt = stmt.where(DetectionRow.detection_id.not_in(ids))
     await session.execute(stmt)
     for rec in records:
+        _require_proof_hash(rec)
         row = await session.get(DetectionRow, rec.detection_id)
         if row is None:
             session.add(_row_from_record(rec))
@@ -450,16 +450,7 @@ async def _reconcile(session: AsyncSession, session_id: str, checkpoint: Checkpo
                     session, rec.detection_id, rec.certificate_json
                 )
         elif hash_differs:
-            row.certificate_json = None
-            row.certificate_version = None
-            await session.execute(
-                delete(DetectionLegRow).where(DetectionLegRow.detection_id == rec.detection_id)
-            )
-            await session.execute(
-                delete(DetectionScenarioRow).where(
-                    DetectionScenarioRow.detection_id == rec.detection_id
-                )
-            )
+            raise ValueError(f"{rec.detection_id} checkpoint hash has no certificate JSON")
         row.status = rec.status.value
         row.classification = rec.classification.value
         row.peak_classification = rec.peak_classification.value
@@ -530,5 +521,6 @@ def _row_from_record(rec: DetectionRecord) -> DetectionRow:
         ),
         closing_certificate_hash=rec.closing_certificate_hash,
         closing_certificate_json=rec.closing_certificate_json,
+        proof_status="certified",
         record_json=rec.model_dump(mode="json"),
     )

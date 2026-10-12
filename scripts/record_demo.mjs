@@ -164,8 +164,8 @@ await copyFile(saved, webm);
 await rm(videoDir, { recursive: true, force: true });
 console.log(webm);
 
+const gif = path.join(outDir, "demo.gif");
 try {
-  const gif = path.join(outDir, "demo.gif");
   await execFileAsync("ffmpeg", [
     "-y",
     "-i",
@@ -176,7 +176,8 @@ try {
   ]);
   console.log(gif);
 } catch (error) {
-  console.error("ffmpeg did not write demo.gif");
+  await rm(gif, { force: true });
+  console.error("ffmpeg did not write demo.gif; removed a stale GIF so it cannot sit beside a new WebM");
   console.error(error instanceof Error ? error.message : error);
 }
 

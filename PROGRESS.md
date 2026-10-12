@@ -946,3 +946,141 @@ https://github.com/bekras10/consistency-engine/actions/runs/38181537030 finished
 with conclusion `success`. Jobs: backend (4m15s), frontend, e2e (3m20s), and
 compose (2m38s, Compose smoke succeeded).
 
+## Phase 19 — final QA — 2026-10-11
+
+Phase 18 was not implemented. Nothing was deployed to a public host. Ready to
+stop: the demonstration in the original phase 20 is already in the tree, and
+this QA pass did not find a blocker that has to be fixed before handoff.
+
+### Fixes
+
+Historical certificates. Alembic `0005_closing_certificate` added closing
+columns and did not look at rows whose qualifying hash belonged to one proof
+and whose `certificate_json` was a later evaluation. `0006_certificate_audit`
+adds `proof_status` (default `certified`) and runs `audit_stored_proofs`. A
+pair whose SHA-256 matches is left alone. A mismatch is rebuilt from the newest
+checkpoint whose `state_digest` recomputes; the stored JSON becomes that proof
+and the hash becomes the hash of those bytes. The displaced document is kept as
+the closing certificate when those columns were empty. If no verified
+checkpoint has the detection, `proof_status` is `uncertified` and the bytes
+stay. Rows are not deleted. Downgrade drops `proof_status` and does not undo a
+repair.
+`test_upgrade_recovers_or_quarantines_pre_0005_mismatched_certificate` failed
+on 0005 with `column "proof_status" does not exist`. After 0006 it passes:
+`det-audit-recover` and `det-audit-rehash` are certified matching pairs,
+`det-audit-intact` is unchanged, and `det-audit-quarantine` stays uncertified
+with the original mismatched bytes.
+
+Fail-closed writes. `_require_proof_hash` used to return when qualifying JSON
+was missing, and an update could store a new hash without replacing the JSON.
+It now raises before any column change, including a closing half-pair.
+`test_missing_certificate_json_is_not_persisted` and
+`test_update_without_json_does_not_leave_a_mismatched_hash` did not raise
+before the change. `test_corrupt_event_rolls_back_the_detection_transaction`
+checks that a valid open and a corrupt update in one batch leave no detection
+row and no outbox row.
+
+Maintenance. The retention task could stay alive while every cycle failed, and
+health still reported healthy because the heartbeat was fresh.
+`consecutive_failures` and `last_success` are written on the heartbeat.
+`MAINTENANCE_MAX_FAILURES` defaults to 3. Health is unhealthy when the count is
+greater than that threshold. `RETENTION_FAULT=cycle` raises inside the cycle
+and the task keeps looping.
+`test_retention_cycle_failures_are_unhealthy_while_the_task_stays_alive`
+failed before the change: the process stayed alive and the heartbeat had no
+failure count. A completed session whose cycle succeeds stays healthy
+(`test_live_maintenance_with_completed_session_stays_healthy`).
+
+Short recording. `docs/demo/demo.webm` (`ffprobe` `44.760000` s, 4,290,463
+bytes) and `docs/demo/demo.gif` (`44.840000` s, 2,249,847 bytes) were not
+replaced. `scripts/record_demo_short.mjs` captured the Compose UI and ffmpeg
+cut the long seek. `docs/demo/demo-short.webm` is `24.440000` s, 3,142,371
+bytes. `docs/demo/demo-short.gif` is `24.510000` s, 1,845,850 bytes. If the GIF
+step fails, the script deletes a stale GIF. No image model was used.
+
+### Defects found in this pass
+
+The detection classification dropdown was built from the already filtered
+rows. After `classification=FEE_ADJUSTED_CANDIDATE` the control offered only
+that class. `list_detections` now loads distinct classifications from the
+table. `test_classification_facet_lists_classes_outside_the_filter` passed.
+
+`/methodology` and `/about` crashed in the Compose image
+(`ENOENT` opening `/docs/mathematical-model.md`; About had the same path
+bug). `readRepoDoc` used `cwd/../..`, which is the repo root for `apps/web`
+and `/` inside the image, and the image did not contain the files. The image
+now copies `README.md`, `docs/mathematical-model.md`, and `docs/compliance.md`
+to `/app/content` and sets `REPO_CONTENT_ROOT`. After rebuilding the frontend,
+both pages rendered those documents. The poll line no longer says the event
+stream is a future phase; the page states that it does not subscribe to
+`GET /api/v1/stream`.
+
+The README called the Kalshi adapter implemented. The module is a skeleton:
+data methods raise `NotImplementedError` and perform no network I/O. The README
+now says that. Phase 18 was not built.
+
+### Verification
+
+Host Postgres `127.0.0.1:5433`. Port 5432 was not modified.
+
+`make lint` clean (`ruff check` and `ruff format --check`). `make typecheck`
+clean, 90 source files. `make test` 508 passed in 122.55s: unit 366, golden
+34, property 24, replay 16, integration 68. Golden expected values were not
+edited. Frontend eslint clean, `tsc --noEmit` clean, Vitest 22 passed (7
+files). `node --test scripts/npm_audit_lib.test.mjs` 4 passed.
+`node scripts/check_npm_audit.mjs` printed `npm audit advisories: 2 advisory id(s); production vulnerability count: 0` for `GHSA-vfj7-8cjw-p6xm` (braces) and `GHSA-rj75-hqrm-r3gf` (postcss-selector-parser), then `npm audit matches the allowlist. Production audit is empty.` Exit 0.
+`uv export --frozen --all-groups --no-emit-workspace` then
+`uvx pip-audit --requirement /tmp/ce-reqs.txt --disable-pip` printed
+`No known vulnerabilities found` and exited 0.
+
+`scripts/e2e.sh` with `E2E_SKIP_COMPOSE=1`, `POSTGRES_PORT=5433`,
+`WEB_PORT=3100` printed Playwright passed, including the disconnected page.
+`e2e/dashboard.spec.ts` 1 passed (45.1s). `e2e/disconnected.spec.ts` 1 passed
+(606ms). `test_upgrade_downgrade_upgrade` ran inside the 508 and passed,
+including revision `0006_certificate_audit`.
+
+`bash scripts/compose_smoke.sh` on project `consistency-smoke-local-85616`
+printed `qualifying certificate sha256:0240383b5da7dea8aeb28ce478bd6e9655c5aa31468692fe1b938e0ebfb107fd matches stored JSON`,
+`replay cursor 981/12277 shows det-f26eee89fc522826ab5d90f1`, and
+`compose smoke passed: 12 detections, 1 completed session, restart kept the same ids`.
+That project was removed by the script. Postgres was not published.
+
+The Compose demo database was upgraded from `0005_closing_certificate` to
+`0006_certificate_audit`. All 12 detections are `proof_status=certified`.
+After recreating the API, worker, and gateway, SHA-256 of the stored JSON for
+`det-f26eee89fc522826ab5d90f1` still matches both stored hashes. Pages checked
+in the browser: overview, detections (filter `FEE_ADJUSTED_CANDIDATE`, 3
+matching), the detection page (net `7.460000`, fees `0.958000`, depth `153`,
+qualifying hash and closing hash), the relationship formal constraints,
+markets, methodology, and about. A 390×844 viewport showed the synthetic
+banner, the four counts, and a horizontally scrollable nav. `GET
+/api/v1/detections/no-such-id` returned `404 {"error":"not_found"}`. An
+unknown route returned `404 {"detail":"Not Found"}`. Neither body contained a
+stack trace.
+
+Independent SHA-256, demo detection, after the audit migration and the
+service restart:
+
+| Row | proof_status | Qualifying | Closing |
+|---|---|---|---|
+| `det-f26eee89fc522826ab5d90f1` | certified | match, 14291 bytes, `sha256:0240383b5da7dea8aeb28ce478bd6e9655c5aa31468692fe1b938e0ebfb107fd` | match, 8281 bytes, `sha256:1f837ec74d44b4012131a54da84259ea3443b646334fa0b336fc967364dc1140` |
+
+Recovery fixture on the host database after the upgrade test, recomputed
+outside the test assertions:
+
+| Row | proof_status | Qualifying | Closing |
+|---|---|---|---|
+| `det-audit-intact` | certified | match, 11659 bytes, `sha256:be8b598c33103f5f5e1caf3a84938d56fb2efb24aadc233ab5dc111dc82f1196` | both empty |
+| `det-audit-recover` | certified | match, same qualifying hash | match, 6649 bytes, `sha256:33438e577cea52cb8ab1d4be7a9f0836e2a08dc8e823ada42b234caab24e20c3` |
+| `det-audit-rehash` | certified | match, hash replaced by the reconstructed proof's hash (the fake `ab` hash was not kept) | match, same closing hash as the displaced document |
+| `det-audit-quarantine` | uncertified | stored hash does not equal SHA-256 of the stored JSON (`sha256:33438e577cea52cb8ab1d4be7a9f0836e2a08dc8e823ada42b234caab24e20c3`); the hash was not rewritten | both empty |
+
+### Residual risks
+
+A downgrade of `0006_certificate_audit` drops `proof_status` and leaves any
+repaired JSON in place. Three retention failures at the default threshold stay
+healthy; the fourth is unhealthy. Replay viewer cursors are still in the
+gateway process. The two development npm advisories stay allowlisted. The
+2281.125 ms end-to-end median was not remeasured. The Kalshi connector is
+still a skeleton and was not built out.
+

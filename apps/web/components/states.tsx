@@ -29,8 +29,7 @@ export function EmptyState({ hint }: { hint: string }) {
 export function PollLabel() {
   return (
     <p data-testid="poll-label" className="text-xs text-[#9aa0a6]">
-      Updates by polling every 5 seconds. A server-sent event stream is Phase 11 and is not
-      connected.
+      Updates by polling every 5 seconds. This page does not subscribe to GET /api/v1/stream.
     </p>
   );
 }

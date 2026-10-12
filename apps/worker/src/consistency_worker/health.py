@@ -17,8 +17,13 @@ service set this), a missing or old heartbeat file is ``unhealthy`` / 1 even if
 the last ingestion session is ``completed``. The maintenance process rewrites
 that file on a short interval, and only while its retention task is still
 running. A fresh timestamp by itself is not enough: the file must say
-``retention=running`` and name a live process. A host ``health`` command that
-does not expect maintenance still treats ``completed`` as healthy.
+``retention=running`` and name a live process. It also records
+``consecutive_failures`` and ``last_success``. Health is ``unhealthy`` when
+consecutive failed retention cycles exceed ``MAINTENANCE_MAX_FAILURES``
+(default 3), even if the process is alive and the timestamp is fresh. A cycle
+that finishes records ``last_success`` and resets the failure count. A host
+``health`` command that does not expect maintenance still treats ``completed``
+as healthy.
 """
 
 from __future__ import annotations
@@ -39,6 +44,7 @@ log = logging.getLogger("consistency.worker.health")
 _DEFAULT_HEARTBEAT = Path("/tmp/consistency-worker/heartbeat")
 _DEFAULT_STALE_S = 30.0
 _DEFAULT_INTERVAL_S = 5.0
+_DEFAULT_MAX_FAILURES = 3
 
 
 def describe_health(status: str | None) -> tuple[str, int]:
@@ -74,6 +80,44 @@ def heartbeat_interval_s() -> float:
     return _positive_float("MAINTENANCE_HEARTBEAT_S", _DEFAULT_INTERVAL_S)
 
 
+def max_consecutive_failures() -> int:
+    """Failed retention cycles above this count are unhealthy. Default is 3."""
+    raw = os.environ.get("MAINTENANCE_MAX_FAILURES", "").strip()
+    if not raw:
+        return _DEFAULT_MAX_FAILURES
+    try:
+        value = int(raw)
+    except ValueError:
+        return _DEFAULT_MAX_FAILURES
+    if value < 0:
+        return _DEFAULT_MAX_FAILURES
+    return value
+
+
+@dataclass
+class RetentionProgress:
+    """In-process count. The heartbeat file is what ``health`` reads."""
+
+    consecutive_failures: int = 0
+    last_success: float | None = None
+
+
+_progress = RetentionProgress()
+
+
+def note_retention_success(now: float | None = None) -> None:
+    _progress.consecutive_failures = 0
+    _progress.last_success = time.time() if now is None else now
+
+
+def note_retention_failure() -> None:
+    _progress.consecutive_failures += 1
+
+
+def retention_progress() -> RetentionProgress:
+    return _progress
+
+
 def _positive_float(name: str, default: float) -> float:
     raw = os.environ.get(name, "").strip()
     if not raw:
@@ -92,6 +136,8 @@ class Heartbeat:
     epoch: float | None
     retention: str | None
     pid: int | None
+    consecutive_failures: int = 0
+    last_success: float | None = None
 
 
 def read_heartbeat(path: Path) -> Heartbeat:
@@ -102,6 +148,8 @@ def read_heartbeat(path: Path) -> Heartbeat:
     epoch: float | None = None
     retention: str | None = None
     pid: int | None = None
+    consecutive_failures = 0
+    last_success: float | None = None
     for line in text.splitlines():
         item = line.strip()
         if not item:
@@ -115,12 +163,28 @@ def read_heartbeat(path: Path) -> Heartbeat:
             except ValueError:
                 pid = None
             continue
+        if item.startswith("consecutive_failures="):
+            try:
+                consecutive_failures = int(item.split("=", 1)[1])
+            except ValueError:
+                consecutive_failures = 0
+            continue
+        if item.startswith("last_success="):
+            raw_success = item.split("=", 1)[1]
+            if raw_success == "none":
+                last_success = None
+            else:
+                try:
+                    last_success = float(raw_success)
+                except ValueError:
+                    last_success = None
+            continue
         if epoch is None:
             try:
                 epoch = float(item)
             except ValueError:
                 continue
-    return Heartbeat(epoch, retention, pid)
+    return Heartbeat(epoch, retention, pid, consecutive_failures, last_success)
 
 
 def pid_is_alive(pid: int) -> bool:
@@ -145,9 +209,14 @@ def write_heartbeat(
     path.parent.mkdir(parents=True, exist_ok=True)
     stamp = time.time() if now is None else now
     process = os.getpid() if pid is None else pid
+    failures = _progress.consecutive_failures
+    success = "none" if _progress.last_success is None else f"{_progress.last_success:.6f}"
     temporary = path.with_name(path.name + ".tmp")
     temporary.write_text(
-        f"{stamp:.6f}\nretention={retention}\npid={process}\n",
+        (
+            f"{stamp:.6f}\nretention={retention}\npid={process}\n"
+            f"consecutive_failures={failures}\nlast_success={success}\n"
+        ),
         encoding="utf-8",
     )
     os.replace(temporary, path)
@@ -168,13 +237,15 @@ def assess_health(
     stale_after_s: float,
     retention_state: str | None = None,
     process_alive: bool | None = None,
+    consecutive_failures: int = 0,
+    max_failures: int = _DEFAULT_MAX_FAILURES,
 ) -> tuple[str, int]:
     """Session status first. A failed ingestion stays failed.
 
     Maintenance is checked only when the session status would otherwise exit 0
     and the entrypoint expects the maintenance process. A fresh timestamp is
     not enough: the retention task must still be attested as running inside a
-    live process.
+    live process, and consecutive failed cycles must not exceed ``max_failures``.
     """
     label, code = describe_health(status)
     if code != 0:
@@ -184,6 +255,8 @@ def assess_health(
     if retention_state != "running" or process_alive is not True:
         return "unhealthy", 1
     if not heartbeat_is_fresh(heartbeat_epoch, now=now, stale_after_s=stale_after_s):
+        return "unhealthy", 1
+    if consecutive_failures > max_failures:
         return "unhealthy", 1
     return label, code
 
@@ -217,4 +290,6 @@ async def report_health(url: str) -> tuple[str, int]:
         stale_after_s=stale_after_s(),
         retention_state=beat.retention,
         process_alive=alive,
+        consecutive_failures=beat.consecutive_failures,
+        max_failures=max_consecutive_failures(),
     )

@@ -98,6 +98,28 @@ def test_assess_health_separates_session_status_from_maintenance_freshness() -> 
         now=now,
         stale_after_s=30.0,
     ) == ("completed", 0)
+    assert assess_health(
+        "completed",
+        expect_maintenance=True,
+        heartbeat_epoch=fresh,
+        now=now,
+        stale_after_s=30.0,
+        retention_state="running",
+        process_alive=True,
+        consecutive_failures=4,
+        max_failures=3,
+    ) == ("unhealthy", 1)
+    assert assess_health(
+        "completed",
+        expect_maintenance=True,
+        heartbeat_epoch=fresh,
+        now=now,
+        stale_after_s=30.0,
+        retention_state="running",
+        process_alive=True,
+        consecutive_failures=3,
+        max_failures=3,
+    ) == ("completed", 0)
 
 
 def test_worker_entrypoint_expects_a_maintenance_heartbeat() -> None:

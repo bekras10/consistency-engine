@@ -137,8 +137,10 @@ the 981-entry prefix before the qualifying books are on screen.
 | `docs/demo/detection-fees.png` | Last qualifying quote: net `7.460000`, fees `0.958000`, depth `153` |
 | `docs/demo/detection.png` | Scenario payoffs and qualifying certificate hash |
 | `docs/demo/replay.png` | Cursor `981/12277`, CPI constraints, the same certificate |
-| `docs/demo/demo.webm` | 44.76 s, 1280×800, 4,290,463 bytes |
-| `docs/demo/demo.gif` | Same take, 720 px wide, 6 fps, 2,249,847 bytes |
+| `docs/demo/demo.webm` | Technical take, ffprobe `44.760000` s, 1280×800, 4,290,463 bytes |
+| `docs/demo/demo.gif` | Same technical take, 720 px wide, 6 fps, ffprobe `44.840000` s, 2,249,847 bytes |
+| `docs/demo/demo-short.webm` | Short cut of a later capture, ffprobe `24.440000` s, 1280×800, 3,142,371 bytes |
+| `docs/demo/demo-short.gif` | Same short cut, 720 px wide, 8 fps, ffprobe `24.510000` s, 1,845,850 bytes |
 
 To record again after `make demo` prints the ids:
 
@@ -153,4 +155,17 @@ node scripts/record_demo.mjs
 
 The script writes `docs/demo/demo.webm`, refreshes the screenshots, and tries
 ffmpeg for `docs/demo/demo.gif`. `docs/demo/.video/` is scratch and is
-gitignored. If Playwright or ffmpeg is missing, do not substitute a drawing.
+gitignored. If ffmpeg does not write the GIF, the script removes a stale
+`demo.gif` so it cannot sit beside a newer WebM. If Playwright or ffmpeg is
+missing, do not substitute a drawing.
+
+The short cut is a separate capture, `scripts/record_demo_short.mjs`, with the
+same environment variables. It does not replace `demo.webm` or `demo.gif`.
+Playwright records the overview (synthetic banner), the relationship's formal
+constraints, the qualifying fee and depth figures, and the certificate hash,
+then the replay of `det-f26eee89fc522826ab5d90f1`. ffmpeg drops the long cursor
+seek and keeps the replay open plus the paused cursor `981` result.
+`ffprobe` reports `demo-short.webm` duration `24.440000` seconds (3,142,371
+bytes) and `demo-short.gif` duration `24.510000` seconds (1,845,850 bytes).
+The script writes both files. If the GIF step fails, it deletes `demo-short.gif`
+and exits 1. `docs/demo/.video-short/` is scratch.

@@ -263,15 +263,87 @@ async def test_retention_task_failure_is_unhealthy(
         await store.aclose()
 
 
+async def test_retention_cycle_failures_are_unhealthy_while_the_task_stays_alive(
+    db: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A raised cleanup must count while the retention task is still running.
+
+    Task exit is a separate failure. This injection raises inside the cycle and
+    leaves the process and the heartbeat timestamp alive.
+    """
+    store = await _completed(db, "retention-cycle")
+    heartbeat = tmp_path / "heartbeat"
+    env = _maintain_env(db, heartbeat, fault="cycle")
+    env["RETENTION_INTERVAL_S"] = "1"
+    env["MAINTENANCE_HEARTBEAT_S"] = "0.05"
+    env["MAINTENANCE_MAX_FAILURES"] = "3"
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "consistency_worker", "maintain"],
+        cwd=ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + 15
+        text = ""
+        failures = 0
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                break
+            if heartbeat.exists():
+                text = heartbeat.read_text(encoding="utf-8")
+                failures = _failure_count(text)
+                if failures > 3 and "retention=running" in text:
+                    break
+            await _sleep()
+        assert proc.poll() is None
+        assert "retention=running" in text
+        assert failures > 3
+        monkeypatch.setenv("EXPECT_MAINTENANCE", "1")
+        monkeypatch.setenv("MAINTENANCE_HEARTBEAT_PATH", str(heartbeat))
+        monkeypatch.setenv("MAINTENANCE_STALE_S", "30")
+        monkeypatch.setenv("MAINTENANCE_MAX_FAILURES", "3")
+        from consistency_worker.health import report_health
+
+        assert await report_health(db) == ("unhealthy", 1)
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+        if proc.stdout is not None:
+            proc.stdout.close()
+        if proc.stderr is not None:
+            proc.stderr.close()
+        await store.aclose()
+
+
+def _failure_count(text: str) -> int:
+    for line in text.splitlines():
+        if line.startswith("consecutive_failures="):
+            try:
+                return int(line.split("=", 1)[1])
+            except ValueError:
+                return 0
+    return 0
+
+
 async def test_live_maintenance_with_completed_session_stays_healthy(
     db: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = await _completed(db, "retention-live")
     heartbeat = tmp_path / "heartbeat"
+    env = _maintain_env(db, heartbeat, fault=None)
+    env["RETENTION_INTERVAL_S"] = "1"
     proc = subprocess.Popen(
         [sys.executable, "-m", "consistency_worker", "maintain"],
         cwd=ROOT,
-        env=_maintain_env(db, heartbeat, fault=None),
+        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -284,11 +356,18 @@ async def test_live_maintenance_with_completed_session_stays_healthy(
                 break
             if heartbeat.exists():
                 text = heartbeat.read_text(encoding="utf-8")
-                if "retention=running" in text:
+                if (
+                    "retention=running" in text
+                    and "consecutive_failures=0" in text
+                    and "last_success=" in text
+                    and "last_success=none" not in text
+                ):
                     break
             await _sleep()
         assert proc.poll() is None
         assert "retention=running" in text
+        assert "consecutive_failures=0" in text
+        assert "last_success=none" not in text
         monkeypatch.setenv("EXPECT_MAINTENANCE", "1")
         monkeypatch.setenv("MAINTENANCE_HEARTBEAT_PATH", str(heartbeat))
         monkeypatch.setenv("MAINTENANCE_STALE_S", "30")

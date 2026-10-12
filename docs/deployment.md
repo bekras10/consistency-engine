@@ -115,12 +115,17 @@ the maintenance process is alive.
 
 The worker service sets `EXPECT_MAINTENANCE=1`. `maintain` writes
 `MAINTENANCE_HEARTBEAT_PATH` (default `/tmp/consistency-worker/heartbeat`)
-every `MAINTENANCE_HEARTBEAT_S` seconds (default 5). If that file is missing
-or older than `MAINTENANCE_STALE_S` (default 30), health prints `unhealthy`
-and exits 1 even when the last ingestion session is `completed`. A host
-`health` command that leaves `EXPECT_MAINTENANCE` unset does not require the
-file. A `failed` ingestion session exits 1 either way. A fresh heartbeat
-does not turn a failed session into a healthy one.
+every `MAINTENANCE_HEARTBEAT_S` seconds (default 5). The file records
+`consecutive_failures` and `last_success` for the retention cycle. If that
+file is missing or older than `MAINTENANCE_STALE_S` (default 30), health
+prints `unhealthy` and exits 1 even when the last ingestion session is
+`completed`. The same word and exit are used when consecutive failed cycles
+exceed `MAINTENANCE_MAX_FAILURES` (default 3), including when the process is
+alive and the timestamp is fresh. A cycle that finishes resets the count and
+writes `last_success`. A host `health` command that leaves
+`EXPECT_MAINTENANCE` unset does not require the file. A `failed` ingestion
+session exits 1 either way. A fresh heartbeat does not turn a failed session
+into a healthy one.
 
 | Status | Printed word | Exit | Meaning |
 |---|---|---|---|
@@ -128,12 +133,14 @@ does not turn a failed session into a healthy one.
 | `completed`, heartbeat fresh or not required | `completed` | 0 | The deterministic session finished. This is an expected terminal state |
 | `interrupted`, heartbeat fresh or not required | `interrupted` | 0 | The journal stopped early. The next start resumes it |
 | `completed` or `running`, maintenance stale | `unhealthy` | 1 | The entrypoint expects maintenance, and the heartbeat is missing or old |
+| `completed` or `running`, retention failures above the threshold | `unhealthy` | 1 | The process is alive and the timestamp is fresh, and `consecutive_failures` is greater than `MAINTENANCE_MAX_FAILURES` (default 3) |
 | `failed` | `failed` | 1 | Processing failed. The container is unhealthy |
 | no row yet | `starting` | 1 | The session has not been opened |
 | database error | `unhealthy` | 1 | The status could not be read |
 
-A completed demo with a live maintenance process stays healthy. A dead or
-wedged maintenance process does not, and neither does failed processing.
+A completed demo whose maintenance process is alive and whose retention cycle
+succeeds stays healthy. A dead process, a process whose cycles keep failing,
+and failed ingestion do not.
 `running` and `completed` share exit 0 when maintenance is fresh so Compose
 can mark both healthy; the printed word distinguishes them.
 

@@ -1,8 +1,8 @@
 # Dashboard
 
-Next.js app for Phase 10. It reads persisted rows through the internal gateway
-(`scripts/dashboard_gateway.py`). It does not implement the Phase 11 `/api/v1` catalog or
-an SSE stream. The UI polls.
+Next.js app. It reads persisted rows through the internal gateway
+(`scripts/dashboard_gateway.py`). The public `/api/v1` catalog and `GET /api/v1/stream`
+run on the API process. This UI polls and does not subscribe to that stream.
 
 ```bash
 npm install

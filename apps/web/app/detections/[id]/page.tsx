@@ -26,6 +26,7 @@ type Detail = {
   depth_supported_quantity: string | null;
   worst_case_payoff?: string | null;
   certificate_hash: string;
+  proof_status?: string;
   executable?: boolean;
   quote_label?: string;
   closing_classification?: string | null;
@@ -213,7 +214,16 @@ export default async function DetectionDetailPage({ params }: { params: Promise<
           </tbody>
         </table>
         <p data-testid="certificate-hash" className="mt-2 font-mono text-xs">certificate {data.certificate_hash}</p>
-        <p className="text-xs text-[#9aa0a6]">Qualifying certificate. Its hash is SHA-256 of this proof, not of the closing evaluation.</p>
+        {data.proof_status === "uncertified" ? (
+          <p data-testid="proof-uncertified" className="mt-2 text-sm">
+            Uncertified. The stored hash is not a verified match for the stored
+            document, and the journal did not reconstruct one.
+          </p>
+        ) : (
+          <p className="text-xs text-[#9aa0a6]">
+            Qualifying certificate. Its hash is SHA-256 of this proof, not of the closing evaluation.
+          </p>
+        )}
       </section>
       {section("Qualifying walked levels and evaluation", certificate?.evaluation)}
       {section("Fees in the qualifying certificate", certificate?.fees ?? certificate?.fee_schedules)}

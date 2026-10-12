@@ -22,7 +22,11 @@ it is not endorsed by Kalshi.
 
 The image is the Compose dashboard at `http://127.0.0.1:3000` after `make demo`.
 The yellow banner is the synthetic-simulation label. The click path, the stored
-qualifying quote, and the recording are in [docs/demo.md](docs/demo.md).
+qualifying quote, and both recordings are in [docs/demo.md](docs/demo.md).
+`ffprobe` reports the technical recording `docs/demo/demo.webm` at `44.760000`
+seconds and `docs/demo/demo.gif` at `44.840000` seconds. The short cut
+`docs/demo/demo-short.webm` is `24.440000` seconds and `docs/demo/demo-short.gif`
+is `24.510000` seconds.
 
 ## Architecture
 
@@ -143,7 +147,7 @@ The dashboard and `POST /api/v1/replay/sessions/{id}/start` each fork a viewer i
 Viewers do not share a cursor and do not write the canonical journal. Viewer state is
 in the gateway process. See [Limitations](docs/limitations.md).
 
-The Kalshi adapter is implemented in `packages/connectors` and is not activated.
+The Kalshi adapter in `packages/connectors` is a skeleton and is not activated.
 `DATA_SOURCE=kalshi_authorized` is refused unless both `ENABLE_KALSHI_API` and
 `KALSHI_AUTHORIZATION_CONFIRMED` are true. Both default to false. This repository does
 not set them.
@@ -196,7 +200,7 @@ make typecheck
 make test
 ```
 
-`make lint` is ruff. `make typecheck` is mypy strict. `make test` is the full pytest
+`make lint` is `ruff check` and `ruff format --check`. `make typecheck` is mypy strict. `make test` is the full pytest
 suite: unit, golden, property, replay, and integration. Integration tests need
 PostgreSQL. They do not use SQLite.
 
@@ -301,7 +305,7 @@ Details: [docs/security.md](docs/security.md).
 |---|---|
 | Synthetic | Default. Deterministic generator and the bundled inconsistent recording |
 | Replay | The same journal, played back with the reference versions recorded at session open |
-| Kalshi adapter | Implemented, not activated. Both enable flags default to false |
+| Kalshi adapter | Skeleton, not activated. Data methods raise before any network call. Both enable flags default to false |
 
 ## Limitations
 

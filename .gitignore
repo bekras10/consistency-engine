@@ -35,3 +35,4 @@ apps/web/out/
 
 # Playwright scratch output from scripts/record_demo.mjs
 docs/demo/.video/
+docs/demo/.video-short/

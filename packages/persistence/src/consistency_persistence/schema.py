@@ -326,6 +326,7 @@ class DetectionRow(Base):
     closing_classification: Mapped[str | None] = mapped_column(Text)
     closing_certificate_hash: Mapped[str | None] = mapped_column(Text)
     closing_certificate_json: Mapped[str | None] = mapped_column(Text)
+    proof_status: Mapped[str] = mapped_column(Text, nullable=False, server_default="certified")
     record_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
 
 

@@ -8,8 +8,11 @@ interrupted reseed is resumed. A latest completed session is not ingested
 again unless ``--reseed`` or ``RESEED_SESSION=true``.
 
 ``maintain`` runs retention until signaled. The heartbeat is rewritten on a
-short interval only while that retention task is still running. If the task
-exits or fails, the process records that and exits 1. It does not ingest.
+short interval only while that retention task is still running. Each cycle
+records a success or increments ``consecutive_failures``. If the task exits or
+fails, the process records that and exits 1. A cycle that raises is counted
+and the task stays up; health treats a failure count above
+``MAINTENANCE_MAX_FAILURES`` as unhealthy. It does not ingest.
 
 ``health`` prints the latest ingestion status and exits 0 for ``running``,
 ``completed``, and ``interrupted`` when maintenance is fresh or not required.
@@ -37,6 +40,8 @@ from consistency_worker import logs
 from consistency_worker.health import (
     heartbeat_interval_s,
     heartbeat_path,
+    note_retention_failure,
+    note_retention_success,
     report_health,
     write_heartbeat,
 )
@@ -87,13 +92,31 @@ async def _run(settings: Settings) -> int:
 
 
 async def _retention_task(store: DatabaseSessionStore) -> None:
-    """Run retention unless a test asked this task to exit or fail."""
+    """Run retention unless a test asked this task to exit or fail.
+
+    ``RETENTION_FAULT=cycle`` raises inside each cycle. The exception is
+    counted and the task keeps running, which is the case a fresh heartbeat
+    used to hide.
+    """
     fault = os.environ.get("RETENTION_FAULT", "").strip()
     if fault == "exit":
         return
     if fault == "fail":
         raise RuntimeError("injected retention failure")
-    await store.retention_loop()
+    interval = store.retention_interval_s
+    if interval <= 0:
+        return
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            if fault == "cycle":
+                raise RuntimeError("injected retention cycle failure")
+            await store.run_retention()
+        except Exception:
+            note_retention_failure()
+            log.exception("retention cycle failed")
+        else:
+            note_retention_success()
 
 
 async def _pulse(stop: asyncio.Event, retention: asyncio.Task[None]) -> None:

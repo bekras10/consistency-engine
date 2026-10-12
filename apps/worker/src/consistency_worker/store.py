@@ -33,6 +33,10 @@ class DatabaseSessionStore:
     async def aclose(self) -> None:
         await self._inner.aclose()
 
+    @property
+    def retention_interval_s(self) -> int:
+        return self._settings.retention_interval_s
+
     async def retention_loop(self) -> None:
         await self._inner.retention_loop(self._settings.retention_interval_s, self._policy)
 
