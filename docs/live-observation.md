@@ -64,13 +64,26 @@ Discovery uses the existing engine. A relationship is `VERIFIED` only when
 every required settlement check passes. Title similarity, an LLM guess, or a
 missing rule cannot raise that status. Live Kalshi payloads do not include
 the engine's full identity (underlying, measurement, unit, observation window,
-methodology, exceptional resolution). Those markets stay candidates until an
-operator review pins the rules hashes. A later change to the rules hash
-requires review again. `mutually_exclusive` on a Kalshi event means at most
-one YES (MECNET). It is not treated as an exhaustive outcome set.
+methodology, exceptional resolution). Those markets stay candidates.
 
-No live verified relationship set is claimed by this repository state. Fixture
-tests cover the mapping and the refusal to verify from titles.
+Bounded discovery keeps whole events. It does not take the first N markets
+and split a family. `KALSHI_SERIES_TICKERS` limits the scan to those series.
+One review bundle is written to `reports/kalshi-review-bundle.json` (override
+with `KALSHI_REVIEW_BUNDLE`). The bundle holds relationship proposals, rule
+excerpts, rules hashes, proposed logic, and edge cases. It does not grant
+`VERIFIED`.
+
+Approved settlement fields enter the strict verifier through
+`apply_settlement_overlay`, then `discover` and, where a human must resolve
+an unknown, the existing manual-review YAML and `apply_reviews`. A later
+rules-hash change demotes the relationship until it is reviewed again.
+`mutually_exclusive` on a Kalshi event means at most one YES (MECNET). It is
+not treated as an exhaustive outcome set.
+
+Periodic discovery (`KALSHI_DISCOVERY_INTERVAL_S`, default 3600) reloads the
+catalog, records enter and exit intervals, and updates the WebSocket
+subscription. No live verified relationship set is claimed by this repository
+state.
 
 ## Fees
 
@@ -86,20 +99,57 @@ not a fee-adjusted positive candidate.
 
 Raw third-party order books are stored only when
 `THIRD_PARTY_RAW_PERSISTENCE_AUTHORIZED=true`. The default is false. In that
-default, the journal does not keep provider books, mismatch records omit
-price levels, and reports omit raw books. Replay of a Kalshi session is then
-unavailable. Derived detection rows can still be stored. That is not
-bit-exact historical replay.
+default the journal, checkpoints, and order-book tables do not keep provider
+books. Replay of that session is unavailable and is not described as bit-exact.
+
+A stored proof certificate is still derived from the live book. When raw
+retention is off, the writer removes `books.asks` and
+`evaluation.legs.walk.levels` before the row and the outbox payload are
+committed, and it stores the hash of those redacted bytes. The certificate
+keeps these third-party quote fields, and the note in the certificate says so:
+
+- `top_of_book.best_asks` (best ask price, no size)
+- `books.book_hash` and book timestamps
+- walk aggregates: premium, vwap, marginal price, filled quantity
+
+Those fields are quote data. They are not "no raw book data." Reports omit
+the ladders. Mismatch rows record timestamps and a verdict
+(`match`, `plausible_update`, `inconsistency`) and do not store the book.
+
+A REST book that differs from an older WebSocket book by more than
+`KALSHI_COMPARE_SKEW_MS` (default 2000) is a plausible update, not corruption.
+A disagreement inside that bound invalidates the book until a snapshot.
 
 ## Observation window
 
+`make kalshi-study-report` reads `STUDY_ID` from PostgreSQL. It keeps only
+eligible `kalshi_authorized` sessions. Synthetic sessions are not mixed in.
+
 An opportunity episode is one detection id from open through close. Book
-updates inside that id are not extra opportunities. A gap closes the trusted
-window; a later snapshot can start a new episode. Calendar time is not
-synchronized monitoring time. A report whose end timestamp is in the future,
-or whose end is unset, is `IN_PROGRESS`. A report with no start and no rows
-is `NOT_STARTED`. Zero fee-adjusted candidates is a valid result. A candidate
-is not an executed trade and not a guaranteed fill.
+updates inside that id are the same discrepancy. A new detection id is a new
+episode. Evaluation rows include negative results. Idempotency keys make a
+restart replay a no-op.
+
+The evaluation funnel is a partition of all recorded evaluations:
+
+- rule-verification rejection
+- market-data quality exclusion (unsynchronized, stale, or insufficient depth)
+- no theoretical deviation
+- theoretical deviation
+- depth-supported
+- fee-unverified
+- fee-verified
+
+Overlapping views, such as "theoretical inconsistency," name their population
+and are not empirical false-positive rates.
+
+Observed duration is the union of recorded coverage and downtime intervals.
+Synchronized monitoring is the union of synchronized coverage only. A planned
+end date produces `COMPLETE` only when that synchronized coverage reaches both
+ends of the planned window. A past end date without that evidence is
+`INCOMPLETE`. An open window is `IN_PROGRESS`. No eligible session and no
+observations is `NOT_STARTED`. Zero fee-adjusted candidates is a valid result.
+A candidate is not an executed trade and not a guaranteed fill.
 
 ## Unresolved restrictions
 

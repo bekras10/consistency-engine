@@ -210,4 +210,7 @@ not an input to classification.
 
 `session_checkpoints` is the extra table spec §12.2 requires for seek. A checkpoint holds the
 book snapshot, engine state, and journal ordinal. Checkpoints contain raw books, so they are
-written only when raw persistence is enabled for that source.
+written only when raw persistence is enabled for that source. For a Kalshi session with raw
+retention off, the stored certificate is a derived-evidence profile: ask ladders and
+consumed-level ladders are removed, and best-ask prices, book hashes, and walk aggregates
+remain and are labelled as quote data. That profile is not a bit-exact book replay.

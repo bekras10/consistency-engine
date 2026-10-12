@@ -21,6 +21,7 @@ from consistency_core.pricing.certificate import ProofCertificate
 from consistency_core.serialization import canonical_json
 from consistency_persistence.dashboard import json_ready
 from consistency_persistence.outbox import reserve_outbox_id
+from consistency_persistence.quote_retention import redact_detection_event
 from consistency_persistence.schema import (
     DetectionLegRow,
     DetectionRow,
@@ -201,15 +202,21 @@ async def load_journal(session: AsyncSession, session_id: str) -> list[JournalEn
 class DetectionWriter:
     """``DetectionSink``: one transaction per batch (detection + legs + scenarios + certificate)."""
 
-    def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
+    def __init__(
+        self, sessions: async_sessionmaker[AsyncSession], *, retain_quote_levels: bool = True
+    ) -> None:
         self._sessions = sessions
+        self.retain_quote_levels = retain_quote_levels
         self.fault: Exception | None = None
 
     async def write(self, events: Sequence[DetectionEvent]) -> None:
         if not events:
             return
+        prepared = (
+            events if self.retain_quote_levels else [redact_detection_event(ev) for ev in events]
+        )
         async with self._sessions() as session, session.begin():
-            for ev in events:
+            for ev in prepared:
                 await _apply_event(session, ev)
             if self.fault is not None:
                 raise self.fault

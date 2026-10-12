@@ -26,11 +26,15 @@ fee calculator uses to choose the fictional or the real schedule.
   `KalshiAccessRefusedError` before any socket. The HTTP client allows GET only, and only
   market, event, series, exchange status/schedule, and `GET /account/limits`. Portfolio,
   order, and balance paths are rejected in code.
-- Raw Kalshi books stay out of PostgreSQL unless `THIRD_PARTY_RAW_PERSISTENCE_AUTHORIZED=true`.
-  The default report omits provider order books. Public technical access is not the same
-  as permission to retain, screenshot, or redistribute Kalshi data. The operator has to
-  confirm the Developer Agreement before setting the flags. This repository does not
-  grant that permission.
+- Raw Kalshi books stay out of the journal, checkpoints, and order-book tables unless
+  `THIRD_PARTY_RAW_PERSISTENCE_AUTHORIZED=true`. When that flag is false, stored
+  certificates omit ask ladders and consumed level ladders. They still retain best-ask
+  prices, book hashes, and walk aggregates, and the certificate text says those fields
+  are third-party quote data. Replay is unavailable in that mode. The default report
+  omits provider order books. Public technical access is not the same as permission to
+  retain, screenshot, or redistribute Kalshi data. The operator has to confirm the
+  Developer Agreement before setting the flags. This repository does not grant that
+  permission.
 
 ## Kalshi Developer Agreement
 

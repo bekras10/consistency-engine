@@ -121,6 +121,8 @@ class Settings(BaseSettings):
     kalshi_pong_timeout_s: float = Field(default=10.0, alias="KALSHI_PONG_TIMEOUT_S")
     kalshi_metadata_refresh_s: float = Field(default=300.0, alias="KALSHI_METADATA_REFRESH_S")
     kalshi_book_compare_s: float = Field(default=60.0, alias="KALSHI_BOOK_COMPARE_S")
+    kalshi_compare_skew_ms: int = Field(default=2000, alias="KALSHI_COMPARE_SKEW_MS")
+    kalshi_discovery_interval_s: float = Field(default=3600.0, alias="KALSHI_DISCOVERY_INTERVAL_S")
     kalshi_member_class: str = Field(default="", alias="KALSHI_MEMBER_CLASS")
     kalshi_intermediary_fees: str = Field(default="unknown", alias="KALSHI_INTERMEDIARY_FEES")
     kalshi_fee_schedule_revisions_checked: bool = Field(
@@ -204,8 +206,17 @@ class Settings(BaseSettings):
             raise ConfigurationError("KALSHI_WS_QUEUE_MAX must be positive.")
         if min(self.kalshi_min_request_interval_s, self.kalshi_ping_interval_s) < 0:
             raise ConfigurationError("Kalshi intervals must be >= 0.")
-        if min(self.kalshi_metadata_refresh_s, self.kalshi_book_compare_s) < 0:
+        if (
+            min(
+                self.kalshi_metadata_refresh_s,
+                self.kalshi_book_compare_s,
+                self.kalshi_discovery_interval_s,
+            )
+            < 0
+        ):
             raise ConfigurationError("Kalshi refresh intervals must be >= 0.")
+        if self.kalshi_compare_skew_ms < 0:
+            raise ConfigurationError("KALSHI_COMPARE_SKEW_MS must be >= 0.")
         if self.kalshi_member_class not in ("", "direct", "non_direct"):
             raise ConfigurationError("KALSHI_MEMBER_CLASS must be direct, non_direct, or empty.")
         if self.kalshi_intermediary_fees not in ("unknown", "accounted", "explicitly_excluded"):

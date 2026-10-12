@@ -34,8 +34,9 @@ this tree.
 
 It does not show a live Kalshi mispricing. It does not place orders. It does
 not report a profit, a user, or a production opportunity. The Kalshi connector
-is an unimplemented skeleton and stays disabled. Nothing in this delivery was
-published to a public host.
+is implemented and stays disabled until the operator sets both authorization
+flags and a key file outside this repository. No 21-day study has been run.
+Nothing in this delivery was published to a public host.
 
 ## Certification
 
@@ -159,7 +160,8 @@ Uncertified rows stay in the database for investigation. A reader that ignores
 `proof_status` could treat the stored JSON as a proof; the proof route and the
 dashboard do not. Replay viewer cursors live in the gateway process. The two
 development npm advisories above stay allowlisted; the production count is 0.
-The Kalshi connector is an unimplemented skeleton and stays disabled. Three
+The Kalshi connector is implemented and stays disabled until the operator sets
+both authorization flags. Three
 retention failures at the default `MAINTENANCE_MAX_FAILURES` of 3 stay healthy;
 the fourth is unhealthy. A successful cycle older than
 `MAINTENANCE_SUCCESS_MAX_AGE_S` (default 7200 seconds) is unhealthy even when

@@ -34,8 +34,9 @@ from consistency_connectors.ingestion import (
     IngestionRunner,
     merge_book_updates,
 )
-from consistency_connectors.settings import Settings
+from consistency_connectors.settings import DataSourceMode, Settings
 from consistency_connectors.sources.recorded import RecordedStreamSource
+from consistency_core.pricing.evaluator import Evaluation
 from consistency_core.serialization import sha256_of
 from consistency_pipeline import checkpoint as cp
 from consistency_pipeline.broker import Broker
@@ -54,6 +55,40 @@ from consistency_worker.bootstrap import SessionInputs, build_inputs
 from consistency_worker.supervisor import Supervisor
 
 log = logging.getLogger("consistency.worker")
+
+
+def _episodes_from_lifecycle(events: list[dict[str, object]]) -> list[dict[str, object]]:
+    """One episode per detection. Lifecycle updates share that detection id."""
+    episodes: list[dict[str, object]] = []
+    for event in events:
+        if event.get("kind") != "lifecycle":
+            continue
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        detection_id = str(event.get("subject_id", ""))
+        study_id = str(event.get("study_id", ""))
+        episodes.append(
+            {
+                "episode_id": f"{study_id}|{detection_id}",
+                "study_id": study_id,
+                "session_id": str(event.get("session_id", "")),
+                "detection_id": detection_id,
+                "relationship_id": str(payload.get("relationship_id", "")),
+                "strategy_id": str(payload.get("strategy_id", "")),
+                "classification": str(event.get("classification", "")),
+                "status": str(payload.get("status", "")),
+                "first_ms": payload.get("first_ms"),
+                "last_ms": payload.get("last_ms"),
+                "close_reason": payload.get("close_reason"),
+                "gross_edge": payload.get("gross_edge"),
+                "fees": payload.get("fees"),
+                "net_edge": payload.get("net_edge"),
+                "quantity": payload.get("quantity"),
+            }
+        )
+    return episodes
+
 
 SessionStatus = Literal["running", "completed", "failed", "interrupted", "stopped"]
 
@@ -111,6 +146,38 @@ class WorkerService:
         self.supervisor: Supervisor | None = None
         self.outbox: Outbox | None = None
         self.started = asyncio.Event()
+        self._study_pending: list[dict[str, object]] = []
+        self._study_session_id = ""
+
+    def _study_enabled(self) -> bool:
+        return bool(self.settings.study_id) and (
+            self.settings.data_source is DataSourceMode.KALSHI_AUTHORIZED
+        )
+
+    def _observe_evaluation(
+        self, ev: Evaluation, relationship_id: str, strategy_id: str, now_ms: int
+    ) -> None:
+        if not self._study_enabled() or not self._study_session_id:
+            return
+        classification = ev.classification.value
+        synchronized = classification not in ("UNSYNCHRONIZED_DATA", "STALE_DATA")
+        key = (
+            f"{self._study_session_id}|evaluation|{relationship_id}|{strategy_id}|"
+            f"{now_ms}|{classification}"
+        )
+        self._study_pending.append(
+            {
+                "idempotency_key": key,
+                "study_id": self.settings.study_id,
+                "session_id": self._study_session_id,
+                "kind": "evaluation",
+                "occurred_ms": now_ms,
+                "subject_id": relationship_id,
+                "classification": classification,
+                "synchronized": synchronized,
+                "payload": {"strategy_id": strategy_id},
+            }
+        )
 
     def _log_events(self, events: list[DetectionEvent]) -> None:
         for ev in events:
@@ -131,6 +198,57 @@ class WorkerService:
                     "internal_latency_ns": ev.timing.internal_latency_ns,
                 },
             )
+            self._queue_lifecycle(ev)
+
+    def _queue_lifecycle(self, ev: DetectionEvent) -> None:
+        if not self._study_enabled() or not self._study_session_id:
+            return
+        rec = ev.record
+        self._study_pending.append(
+            {
+                "idempotency_key": f"{rec.session_id}|lifecycle|{ev.detection_id}|{ev.seq}",
+                "study_id": self.settings.study_id,
+                "session_id": rec.session_id,
+                "kind": "lifecycle",
+                "occurred_ms": ev.at_ms,
+                "subject_id": ev.detection_id,
+                "classification": rec.classification.value,
+                "synchronized": True,
+                "payload": {
+                    "kind": ev.kind.value,
+                    "relationship_id": rec.relationship_id,
+                    "strategy_id": rec.strategy_id,
+                    "status": rec.status.value,
+                    "first_ms": rec.first_observed_ms,
+                    "last_ms": rec.last_observed_ms,
+                    "close_reason": None if ev.close_reason is None else ev.close_reason.value,
+                    "gross_edge": None
+                    if rec.metrics.gross_edge is None
+                    else format(rec.metrics.gross_edge, "f"),
+                    "fees": None
+                    if rec.metrics.total_fees is None
+                    else format(rec.metrics.total_fees, "f"),
+                    "net_edge": None
+                    if rec.metrics.net_edge is None
+                    else format(rec.metrics.net_edge, "f"),
+                    "quantity": None
+                    if rec.metrics.depth_supported_quantity is None
+                    else format(rec.metrics.depth_supported_quantity, "f"),
+                },
+            }
+        )
+
+    async def _flush_study(self) -> None:
+        pending = self._study_pending
+        self._study_pending = []
+        if not pending or self.store is None:
+            return
+        record = getattr(self.store, "record_study_events", None)
+        episodes = getattr(self.store, "record_study_episodes", None)
+        if callable(record):
+            await record(pending)
+        if callable(episodes):
+            await episodes(_episodes_from_lifecycle(pending))
 
     async def _feed(self, updates: CoalescingQueue[BookUpdate], manager: BookManager) -> None:
         while True:
@@ -146,6 +264,7 @@ class WorkerService:
             await self._sleep(interval)
             now = self._wall_ms()
             await listener.tick(now)
+            await self._flush_study()
             if now - last_maintenance < 5000:
                 continue
             last_maintenance = now
@@ -154,8 +273,47 @@ class WorkerService:
                 consider = getattr(inputs.source, "consider_maintenance", None)
                 if callable(consider):
                     await consider(manager)
+                await self._apply_universe(inputs, listener)
+                await self._flush_study()
             except Exception:
                 log.warning("live feed maintenance failed")
+
+    async def _apply_universe(self, inputs: SessionInputs, listener: PipelineListener) -> None:
+        source = inputs.source
+        drain = getattr(source, "drain_membership_changes", None)
+        if callable(drain):
+            for change in drain():
+                if not self._study_enabled():
+                    continue
+                action = str(getattr(change, "action", ""))
+                subject_id = str(getattr(change, "subject_id", ""))
+                kind = str(getattr(change, "subject_kind", ""))
+                at_ms = int(getattr(change, "at_ms", 0))
+                self._study_pending.append(
+                    {
+                        "idempotency_key": (
+                            f"{self._study_session_id}|membership|{kind}|{subject_id}|{action}|{at_ms}"
+                        ),
+                        "study_id": self.settings.study_id,
+                        "session_id": self._study_session_id,
+                        "kind": "membership",
+                        "occurred_ms": at_ms,
+                        "subject_id": subject_id,
+                        "classification": str(getattr(change, "verification_status", "")),
+                        "synchronized": True,
+                        "payload": {
+                            "action": action,
+                            "subject_kind": kind,
+                            "fingerprint": str(getattr(change, "fingerprint", "")),
+                        },
+                    }
+                )
+        take = getattr(source, "take_relationship_revision", None)
+        if callable(take):
+            revised = take()
+            if revised:
+                inputs.relationships = list(revised)
+                await listener.change_relationships(revised)
 
     async def _record_feed(self, inputs: SessionInputs) -> None:
         status_fn = getattr(inputs.source, "feed_status", None)
@@ -209,6 +367,12 @@ class WorkerService:
                 config=inputs.evaluation_config,
             )
             start_ordinal = 0
+        self._study_session_id = opened.session_id
+        if self._study_enabled():
+            engine.evaluation_observer = self._observe_evaluation
+        note = getattr(inputs.source, "note_relationships", None)
+        if callable(note):
+            note(inputs.relationships)
         outbox = Outbox(opened.sink, self.broker, maxsize=s.outbox_maxsize)
 
         async def _drain_outbox() -> None:
@@ -228,6 +392,7 @@ class WorkerService:
         if resume is not None:
             listener.last_message_position = resume.source_position
         self.listener, self.outbox = listener, outbox
+        await self._apply_universe(inputs, listener)
         updates: CoalescingQueue[BookUpdate] = CoalescingQueue(
             s.update_queue_maxsize, merge=merge_book_updates
         )
@@ -311,6 +476,8 @@ class WorkerService:
                 t.cancel()
             await asyncio.gather(stop_task, sup_task, *background, return_exceptions=True)
             if self.store is not None:
+                with contextlib.suppress(Exception):
+                    await self._flush_study()
                 with contextlib.suppress(Exception):
                     await self.store.close_session(opened.session_id, status=status, detail=detail)
             log.info(

@@ -115,6 +115,12 @@ class OrderBookStream:
         self._control: asyncio.Queue[StreamMessage] = asyncio.Queue(settings.kalshi_ws_queue_max)
         self._suspend_reason: dict[str, str] = {}
         self.backpressured = False
+        self.fail_closed = False
+        self.markets_pending_invalidation: set[str] = set()
+        self._desired: tuple[str, ...] = ()
+        self._desired_explicit = False
+        self._restart_requested = False
+        self._restart_task: asyncio.Task[None] | None = None
         self.reconnects = 0
         self.gaps_recovered = 0
         self.message_count = 0
@@ -135,6 +141,8 @@ class OrderBookStream:
             "messages": self.message_count,
             "auth_failures": self.auth_failures,
             "backpressured": self.backpressured,
+            "fail_closed": self.fail_closed,
+            "pending_invalidation": sorted(self.markets_pending_invalidation),
             "rules_changed": list(self.rules_changed),
             "mismatches": list(self.mismatches),
             "last_error": self.last_error,
@@ -147,8 +155,14 @@ class OrderBookStream:
             self.rules_changed.append(market_id)
         self._enqueue(self._status_message(market_id, status))
 
-    def record_mismatch(self, ticker: str, *, equal: bool) -> None:
-        self.mismatches.append({"ticker": ticker, "equal": equal, "checked_at_ms": self._clock()})
+    def record_mismatch(self, ticker: str, *, equal: bool, **detail: object) -> None:
+        row: dict[str, object] = {
+            "ticker": ticker,
+            "equal": equal,
+            "checked_at_ms": self._clock(),
+        }
+        row.update(detail)
+        self.mismatches.append(row)
 
     async def request_recovery(self, request: RecoveryRequest) -> None:
         conn = self._conn
@@ -161,16 +175,41 @@ class OrderBookStream:
         self.gaps_recovered += 1
         await conn.send(_dumps(self._update(sid, tickers, "get_snapshot")))
 
+    async def add_markets(self, market_ids: list[str]) -> None:
+        """Add tickers to the live subscription. The next reconnect uses the same set."""
+        current = list(self._desired or self.subscribed)
+        added = [ticker for ticker in market_ids if ticker not in current]
+        if not added:
+            return
+        self._desired = (*current, *added)
+        self._desired_explicit = True
+        conn = self._conn
+        sid = self._sid
+        if conn is None or sid is None or self.fail_closed:
+            return
+        await conn.send(_dumps(self._update(sid, added, "add_markets")))
+
     async def unsubscribe(self, market_ids: list[str]) -> None:
         conn = self._conn
         sid = self._sid
-        if conn is None or sid is None or not market_ids:
+        if not market_ids:
+            return
+        if self._desired_explicit or self._desired:
+            self._desired = tuple(ticker for ticker in self._desired if ticker not in market_ids)
+            self._desired_explicit = True
+        if conn is None or sid is None or self.fail_closed:
             return
         await conn.send(_dumps(self._update(sid, market_ids, "delete_markets")))
 
     async def messages(self, tickers: list[str]) -> AsyncIterator[StreamMessage]:
         """One connection. The caller reconnects after ``ConnectionError``."""
-        self.subscribed = tuple(tickers)
+        selected = list(self._desired) if self._desired_explicit else list(tickers)
+        self.fail_closed = False
+        self.markets_pending_invalidation = set()
+        self._restart_requested = False
+        self.subscribed = tuple(selected)
+        if not self._desired_explicit:
+            self._desired = tuple(selected)
         self._generation += 1
         self._connection_id = f"kalshi-{self._generation}"
         self._sid = None
@@ -205,7 +244,7 @@ class OrderBookStream:
                         "cmd": "subscribe",
                         "params": {
                             "channels": ["orderbook_delta"],
-                            "market_tickers": tickers,
+                            "market_tickers": selected,
                         },
                     }
                 )
@@ -218,7 +257,17 @@ class OrderBookStream:
                     yield payload
                     continue
                 if kind == "data" and isinstance(payload, str):
+                    if self.fail_closed:
+                        raise ConnectionError(
+                            "Kalshi control queue saturated; books stay untrusted "
+                            "until the connection restarts and a snapshot is applied"
+                        )
                     for message in self._decode(payload):
+                        if self.fail_closed:
+                            raise ConnectionError(
+                                "Kalshi control queue saturated; books stay untrusted "
+                                "until the connection restarts and a snapshot is applied"
+                            )
                         yield message
         finally:
             self._conn = None
@@ -353,10 +402,38 @@ class OrderBookStream:
         )
 
     def _enqueue(self, message: StreamMessage) -> None:
+        if self.fail_closed:
+            self._invalidate(message)
+            return
         try:
             self._control.put_nowait(message)
         except asyncio.QueueFull:
             self.backpressured = True
+            self.fail_closed = True
+            self.last_error = "control_queue_full"
+            self._invalidate(message)
+            self._request_restart()
+
+    def _invalidate(self, message: StreamMessage) -> None:
+        event = message.event
+        if isinstance(event, MarketStatusEvent):
+            self.markets_pending_invalidation.add(event.market_id)
+        self.markets_pending_invalidation.update(self.subscribed)
+
+    def _request_restart(self) -> None:
+        """Close the socket so the runner marks every book on it unsynchronized."""
+        self._restart_requested = True
+        conn = self._conn
+        if conn is None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._restart_task = loop.create_task(self._close_for_restart(conn))
+
+    async def _close_for_restart(self, conn: WsConnection) -> None:
+        await _close_quietly(conn)
 
     def _next_command(self) -> int:
         self._command += 1

@@ -25,16 +25,23 @@ from consistency_connectors.kalshi.rest import HttpResponse, KalshiHttpError, Ka
 from consistency_connectors.kalshi.stream import OrderBookStream
 from consistency_connectors.kalshi.study import (
     build_report,
+    determine_window,
     distinct_episodes,
     report_json,
     report_markdown,
 )
 from consistency_connectors.settings import ConfigurationError, DataSourceMode, Settings
-from consistency_connectors.sources.kalshi import KalshiDataSource
-from consistency_core.events import OrderBookDeltaEvent, OrderBookSnapshotEvent, RawWireEvent
+from consistency_connectors.sources.kalshi import KalshiDataSource, rest_book_disagreement
+from consistency_core.events import (
+    MarketStatusEvent,
+    OrderBookDeltaEvent,
+    OrderBookSnapshotEvent,
+    RawWireEvent,
+    StreamMessage,
+)
 from consistency_core.fees import FeeCalculator, FeeScheduleRegistry
 from consistency_core.fees.calculator import FeeReason
-from consistency_core.models.common import DataSourceKind, Side, SyncStatus
+from consistency_core.models.common import DataSourceKind, MarketStatus, Side, SyncStatus
 from consistency_core.models.orderbook import BookValidationError, OrderBook
 from consistency_core.money import dec
 from consistency_core.normalization import normalize_rest_orderbook
@@ -627,3 +634,100 @@ def test_live_smoke_stays_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
     source = KalshiDataSource(_settings())
     assert source.stream_is_finite is False
     assert source.feed_status()["replay_available"] is False
+
+
+def test_a_past_end_date_is_not_complete_without_coverage() -> None:
+    now = datetime(2026, 10, 11, tzinfo=UTC)
+    status = determine_window(
+        study_start="2026-10-01T00:00:00+00:00",
+        study_end="2026-10-03T00:00:00+00:00",
+        now=now,
+        observed_ms=0,
+        episodes=0,
+        eligible_sessions=0,
+        coverage_established=False,
+    )
+    assert status == "INCOMPLETE"
+    finished = determine_window(
+        study_start="2026-10-01T00:00:00+00:00",
+        study_end="2026-10-03T00:00:00+00:00",
+        now=now,
+        observed_ms=86_400_000,
+        episodes=1,
+        eligible_sessions=1,
+        coverage_established=True,
+    )
+    assert finished == "COMPLETE"
+
+
+def test_rest_disagreement_allows_skew_and_flags_a_fresh_conflict() -> None:
+    assert rest_book_disagreement(equal=True, book_ts_ms=0, now_ms=5_000, skew_ms=2_000) == "match"
+    assert (
+        rest_book_disagreement(equal=False, book_ts_ms=0, now_ms=5_000, skew_ms=2_000)
+        == "plausible_update"
+    )
+    assert (
+        rest_book_disagreement(equal=False, book_ts_ms=4_000, now_ms=5_000, skew_ms=2_000)
+        == "inconsistency"
+    )
+
+
+def test_control_queue_saturation_fails_closed_and_desyncs_books() -> None:
+    stream = OrderBookStream(
+        _settings(KALSHI_WS_QUEUE_MAX=1),
+        signer=_Signer(),
+        transport=_Ws([]),
+        clock_ms=lambda: 10,
+        sleep=_no_sleep,
+    )
+    stream.subscribed = ("KX",)
+    stream._enqueue(stream._status_message("OTHER", MarketStatus.OPEN))
+    assert stream.fail_closed is False
+    stream.suspend("KX", MarketStatus.PAUSED, "rest_mismatch")
+    assert stream.fail_closed is True
+    assert stream.last_error == "control_queue_full"
+    assert "KX" in stream.markets_pending_invalidation
+    assert stream.backpressured is True
+    queued = stream._control.get_nowait()
+    assert isinstance(queued.event, MarketStatusEvent)
+    assert queued.event.market_id == "OTHER"
+    assert stream._control.empty()
+
+    manager = BookManager([market("KX", grid=GRID)], source="kalshi:production")
+
+    def message(event: object, position: int) -> StreamMessage:
+        return StreamMessage(position=position, emitted_ts_ms=100, received_ts_ms=110, event=event)  # type: ignore[arg-type]
+
+    snapshot = OrderBookSnapshotEvent(
+        market_id="KX",
+        sid="7",
+        seq=1,
+        connection_id="c1",
+        yes_bids=((dec("0.40"), dec("1.00")),),
+        no_bids=((dec("0.50"), dec("1.00")),),
+    )
+    delta = OrderBookDeltaEvent(
+        market_id="KX",
+        sid="7",
+        seq=2,
+        connection_id="c1",
+        side=Side.YES,
+        price=dec("0.40"),
+        delta=dec("-1.00"),
+    )
+    manager.process(message(snapshot, 0))
+    assert manager.sync_status("KX") is SyncStatus.SYNCHRONIZED
+    manager.connection_lost("c1", "control_queue_full")
+    assert manager.sync_status("KX") is SyncStatus.UNSYNCHRONIZED
+    manager.process(message(delta, 1))
+    assert manager.sync_status("KX") is SyncStatus.UNSYNCHRONIZED
+    recovered = OrderBookSnapshotEvent(
+        market_id="KX",
+        sid="8",
+        seq=1,
+        connection_id="c2",
+        yes_bids=((dec("0.41"), dec("1.00")),),
+        no_bids=((dec("0.50"), dec("1.00")),),
+    )
+    manager.process(message(recovered, 2))
+    assert manager.sync_status("KX") is SyncStatus.SYNCHRONIZED

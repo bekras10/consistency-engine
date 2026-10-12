@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+from consistency_connectors.kalshi.families import select_complete_families
 from consistency_connectors.kalshi.rest import KalshiRestClient
 from consistency_connectors.settings import Settings
 from consistency_core.models.common import DataSourceKind, MarketStatus, Provenance
@@ -356,8 +357,9 @@ def catalog_from_payloads(
             skipped.append(f"{ticker}: unsupported or malformed market")
             continue
         mapped_markets.append(market)
-        if len(mapped_markets) >= limit:
-            break
+    selected, family_skips = select_complete_families(mapped_markets, limit=limit)
+    skipped.extend(family_skips)
+    mapped_markets = list(selected)
     mapped_events = []
     for event_id in sorted({m.event_id for m in mapped_markets}):
         raw_event = by_event.get(event_id)
@@ -396,21 +398,23 @@ async def load_catalog(
         params["mve_filter"] = "exclude"
     pages = 0
     raw_markets: list[dict[str, object]] = []
+    scan_cap = settings.kalshi_page_limit * settings.kalshi_max_pages
     if series_filter:
         for ticker in series_filter:
+            remaining = scan_cap - len(raw_markets)
+            if remaining <= 0:
+                break
             batch, used = await client.paginate(
                 "/markets",
                 {**params, "series_ticker": ticker},
                 "markets",
-                max_items=settings.kalshi_market_limit - len(raw_markets),
+                max_items=remaining,
             )
             pages += used
             raw_markets.extend(batch)
-            if len(raw_markets) >= settings.kalshi_market_limit:
-                break
     else:
         raw_markets, pages = await client.paginate(
-            "/markets", params, "markets", max_items=settings.kalshi_market_limit
+            "/markets", params, "markets", max_items=scan_cap
         )
     if not raw_markets:
         raise CatalogLoadError("Bounded discovery returned no open markets.")

@@ -16,14 +16,17 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from consistency_connectors.kalshi.families import relationship_proposals
 from consistency_connectors.kalshi.study import (
     build_report,
     operator_review_bundle,
+    report_csv,
     report_json,
     report_markdown,
 )
 from consistency_connectors.settings import Settings
 from consistency_connectors.sources.kalshi import KalshiAccessRefusedError, KalshiDataSource
+from consistency_core.models.market import Catalog
 
 
 def _flags_and_credentials() -> bool:
@@ -84,18 +87,18 @@ def discover() -> int:
 
     async def _load() -> int:
         markets = await source.get_markets()
-        proposals = [
-            {
-                "ticker": market.market_id,
-                "event_id": market.event_id,
-                "rules": market.settlement_rules,
-                "rules_hash": market.rules_hash,
-                "verification": "CANDIDATE_REVIEW",
-                "rationale": "Live payload did not supply a complete settlement identity.",
-            }
-            for market in markets
-        ]
+        catalog = Catalog(
+            series=tuple(await source.get_series()),
+            events=tuple(await source.get_events()),
+            markets=tuple(markets),
+        )
+        proposals = relationship_proposals(catalog, as_of=datetime.now(UTC))
         bundle = operator_review_bundle(proposals)
+        bundle["operator_review_path"] = (
+            "One batch for the selected event families. Fill settlement fields with "
+            "apply_settlement_overlay, then pin rules hashes in the manual-review YAML "
+            "consumed by apply_reviews. This file does not grant VERIFIED. Titles are not evidence."
+        )
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(f"wrote {out} markets={len(markets)} verified=0")
@@ -122,35 +125,94 @@ def run() -> int:
     return main(["run"])
 
 
+async def _report_from_database(url: str, study_id: str, now: datetime) -> dict[str, object]:
+    from consistency_persistence.db import make_engine, make_sessionmaker
+    from consistency_persistence.study_ledger import StudyLedger
+
+    engine = make_engine(url)
+    try:
+        facts = await StudyLedger(make_sessionmaker(engine)).load(study_id)
+    finally:
+        await engine.dispose()
+    exclusions = list(facts.exclusions)
+    if not facts.found:
+        exclusions.append("no kalshi_authorized study row matched STUDY_ID")
+    return build_report(
+        study_id=facts.study_id or study_id,
+        study_start=facts.planned_start,
+        study_end=facts.planned_end,
+        now=now,
+        commit=facts.commit_sha or "unknown",
+        config_fingerprint=facts.config_fingerprint or "unknown",
+        environment=facts.environment or os.environ.get("KALSHI_ENVIRONMENT", "production"),
+        market_ids=facts.market_ids,
+        relationship_ids=facts.relationship_ids,
+        verified_relationship_ids=facts.verified_relationship_ids,
+        fee_schedule_ids=["kalshi-2026-07-07"],
+        raw_retention_authorized=facts.raw_retention_authorized,
+        replay_available=facts.replay_available,
+        rows=facts.episode_rows,
+        analyzed_updates=facts.analyzed_updates,
+        synchronized_evaluations=None,
+        observed_ms=facts.observed_ms,
+        synchronized_ms=facts.synchronized_ms,
+        coverage_established=facts.coverage_established,
+        eligible_sessions=facts.eligible_sessions,
+        evaluation_rows=facts.evaluation_rows,
+        membership=facts.membership,
+        exclusions=exclusions,
+        ledger={
+            "downtime_ms": facts.downtime_ms,
+            "desync_ms": facts.desync_ms,
+            "reconnects": facts.reconnects,
+            "skipped": facts.skipped,
+            "excluded": facts.excluded,
+            "fee_verified_checks": facts.fee_verified_checks,
+            "fee_unverified_checks": facts.fee_unverified_checks,
+            "latency_samples": facts.latency_samples,
+            "latency_max_ms": facts.latency_max_ms,
+            "freshness_samples": facts.freshness_samples,
+        },
+    )
+
+
 def study_report() -> int:
     now = datetime.now(UTC)
-    rows: list[dict[str, object]] = []
-    report = build_report(
-        study_id=os.environ.get("STUDY_ID", ""),
-        study_start=os.environ.get("STUDY_START", ""),
-        study_end=os.environ.get("STUDY_END", ""),
-        now=now,
-        commit=os.environ.get("GIT_COMMIT", "unknown"),
-        config_fingerprint=os.environ.get("CONFIG_FINGERPRINT", "unknown"),
-        environment=os.environ.get("KALSHI_ENVIRONMENT", "production"),
-        market_ids=[],
-        relationship_ids=[],
-        verified_relationship_ids=[],
-        fee_schedule_ids=["kalshi-2026-07-07"],
-        raw_retention_authorized=(
-            os.environ.get("THIRD_PARTY_RAW_PERSISTENCE_AUTHORIZED", "").lower() == "true"
-        ),
-        replay_available=False,
-        rows=rows,
-        analyzed_updates=None,
-        synchronized_evaluations=None,
-    )
+    url = os.environ.get("DATABASE_URL", "").strip()
+    study_id = os.environ.get("STUDY_ID", "").strip()
+    if url and study_id:
+        report = asyncio.run(_report_from_database(url, study_id, now))
+    else:
+        report = build_report(
+            study_id=study_id,
+            study_start=os.environ.get("STUDY_START", ""),
+            study_end=os.environ.get("STUDY_END", ""),
+            now=now,
+            commit=os.environ.get("GIT_COMMIT", "unknown"),
+            config_fingerprint=os.environ.get("CONFIG_FINGERPRINT", "unknown"),
+            environment=os.environ.get("KALSHI_ENVIRONMENT", "production"),
+            market_ids=[],
+            relationship_ids=[],
+            verified_relationship_ids=[],
+            fee_schedule_ids=["kalshi-2026-07-07"],
+            raw_retention_authorized=(
+                os.environ.get("THIRD_PARTY_RAW_PERSISTENCE_AUTHORIZED", "").lower() == "true"
+            ),
+            replay_available=False,
+            rows=[],
+            analyzed_updates=None,
+            synchronized_evaluations=None,
+            coverage_established=False,
+            eligible_sessions=0,
+        )
     directory = Path(os.environ.get("KALSHI_REPORT_DIR", "reports"))
     directory.mkdir(parents=True, exist_ok=True)
     json_path = directory / "kalshi-study.json"
     md_path = directory / "kalshi-study.md"
     json_path.write_text(report_json(report), encoding="utf-8")
     md_path.write_text(report_markdown(report), encoding="utf-8")
+    csv_path = directory / "kalshi-study.csv"
+    csv_path.write_text(report_csv(report), encoding="utf-8")
     draft = directory / "kalshi-study-x-draft.txt"
     draft.write_text(str(report.get("unpublished_x_draft", "")) + "\n", encoding="utf-8")
     print(f"window={report['window_status']} json={json_path} markdown={md_path}")

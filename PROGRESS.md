@@ -3,6 +3,34 @@
 Source of truth: [docs/SPECIFICATION.md](docs/SPECIFICATION.md). This file holds the
 implementation plan, per-phase log, decisions, and known limitations.
 
+## Audit remediation — 2026-10-12
+
+The study report now reads one `STUDY_ID` from PostgreSQL. A planned end date is
+`COMPLETE` only when stored synchronized coverage reaches that window. Opportunity
+episodes are one detection id, not one book update. Discovery keeps whole events.
+Reviewed settlement fields can enter the existing verifier; titles still cannot.
+A full control queue closes the socket and leaves books unsynchronized until a
+new snapshot. Kalshi certificates omit ask ladders when raw retention is off and
+still keep best-ask prices, book hashes, and walk aggregates. No 21-day study
+was run and no live Kalshi request was made.
+
+Verification on this machine (Docker Postgres 16, host port 5433): `ruff check`
+and `ruff format --check` clean, `mypy` clean (101 source files). Python:
+unit 397 passed, golden 34 passed, property 24 passed, replay 16 passed,
+integration 82 passed and 1 skipped (`test_kalshi_live_smoke`). Full
+`pytest` 553 passed, 1 skipped, in 122.59s. Alembic downgrade to base and
+upgrade back to `0007_study_ledger`. `uvx pip-audit` reported no known
+vulnerabilities. Frontend: eslint clean, `tsc --noEmit` clean, Vitest 22
+passed (7 files), `next build` succeeded (Next.js 15.5.27). `node --test
+scripts/npm_audit_lib.test.mjs` 4 passed. `node scripts/check_npm_audit.mjs`
+printed production vulnerability count 0. `scripts/e2e.sh` with
+`E2E_SKIP_COMPOSE=1`, `POSTGRES_PORT=5433`, and `WEB_PORT=3001`: Playwright
+`dashboard.spec.ts` 1 passed (20.3s) and `disconnected.spec.ts` 1 passed
+(156ms). `scripts/compose_smoke.sh` passed: 12 detections, 1 completed
+synthetic session, restart kept the same ids. The Kalshi compose override
+config keeps authorization, raw retention, and live trading false and does
+not inline a key file.
+
 ## Authorized Kalshi read-only adapter — 2026-10-11
 
 - The existing `KalshiDataSource` now loads markets, books, and an authenticated

@@ -130,6 +130,7 @@ class DetectionEngine:
         self._market_cache: dict[tuple[str, MarketStatus], tuple[Market, Market]] = {}
         self._primed = False
         self.stats = EngineStats()
+        self.evaluation_observer: Callable[[Evaluation, str, str, int], None] | None = None
         self._install({r.relationship_id: r for r in relationships}, keep=False)
 
     # ------------------------------------------------------------------ read API
@@ -414,6 +415,10 @@ class DetectionEngine:
                 ev = self._evaluate(slot, now_ms, None)
         slot.last_eval_ms = now_ms
         slot.evaluation = ev
+        if self.evaluation_observer is not None:
+            self.evaluation_observer(
+                ev, slot.relationship.relationship_id, slot.portfolio.strategy_id, now_ms
+            )
         timing = timing.model_copy(
             update={"processing_started_ns": started, "detection_completed_ns": self._clock_ns()}
         )

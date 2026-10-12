@@ -52,6 +52,11 @@ SPEC_TABLES: tuple[str, ...] = (
     "notification_outbox",
     "outbox_claims",
     "outbox_retention",
+    "observation_studies",
+    "study_sessions",
+    "study_membership_intervals",
+    "study_events",
+    "opportunity_episodes",
 )
 CHECKPOINT_TABLE = "session_checkpoints"
 
@@ -411,3 +416,99 @@ class SystemHealthRow(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False)
     checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     detail: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+
+
+class ObservationStudyRow(Base):
+    """One named observation window. Synthetic studies are not live results."""
+
+    __tablename__ = "observation_studies"
+
+    study_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    source_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    environment: Mapped[str] = mapped_column(Text, nullable=False)
+    commit_sha: Mapped[str] = mapped_column(Text, nullable=False)
+    config_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    planned_start: Mapped[str] = mapped_column(Text, nullable=False)
+    planned_end: Mapped[str] = mapped_column(Text, nullable=False)
+    raw_retention_authorized: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class StudySessionRow(Base):
+    """A worker session that may contribute to a study. Eligibility is explicit."""
+
+    __tablename__ = "study_sessions"
+    __table_args__ = (Index("ix_study_sessions_study", "study_id", "eligible", "source_kind"),)
+
+    study_id: Mapped[str] = mapped_column(
+        ForeignKey("observation_studies.study_id", ondelete="CASCADE"), primary_key=True
+    )
+    session_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    source_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    eligible: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    started_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    ended_ms: Mapped[int | None] = mapped_column(BigInteger)
+
+
+class StudyMembershipRow(Base):
+    """When a market or relationship entered and left the monitored set."""
+
+    __tablename__ = "study_membership_intervals"
+    __table_args__ = (
+        Index("ix_study_membership_subject", "study_id", "subject_kind", "subject_id"),
+    )
+
+    study_id: Mapped[str] = mapped_column(
+        ForeignKey("observation_studies.study_id", ondelete="CASCADE"), primary_key=True
+    )
+    session_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    subject_kind: Mapped[str] = mapped_column(Text, primary_key=True)
+    subject_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    entered_ms: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    exited_ms: Mapped[int | None] = mapped_column(BigInteger)
+    fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    verification_status: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class StudyEventRow(Base):
+    """Append-only observation. The idempotency key survives a worker restart."""
+
+    __tablename__ = "study_events"
+    __table_args__ = (Index("ix_study_events_kind", "study_id", "session_id", "kind"),)
+
+    idempotency_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    study_id: Mapped[str] = mapped_column(
+        ForeignKey("observation_studies.study_id", ondelete="CASCADE"), nullable=False
+    )
+    session_id: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    occurred_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    subject_id: Mapped[str] = mapped_column(Text, nullable=False)
+    classification: Mapped[str] = mapped_column(Text, nullable=False)
+    synchronized: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+
+
+class OpportunityEpisodeRow(Base):
+    """One continuous detection. Book updates of the same id are not new episodes."""
+
+    __tablename__ = "opportunity_episodes"
+    __table_args__ = (Index("ix_opportunity_episodes_study", "study_id", "session_id"),)
+
+    episode_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    study_id: Mapped[str] = mapped_column(
+        ForeignKey("observation_studies.study_id", ondelete="CASCADE"), nullable=False
+    )
+    session_id: Mapped[str] = mapped_column(Text, nullable=False)
+    detection_id: Mapped[str] = mapped_column(Text, nullable=False)
+    relationship_id: Mapped[str] = mapped_column(Text, nullable=False)
+    strategy_id: Mapped[str] = mapped_column(Text, nullable=False)
+    classification: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    first_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    last_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    close_reason: Mapped[str | None] = mapped_column(Text)
+    gross_edge: Mapped[Decimal | None] = mapped_column(Numeric)
+    fees: Mapped[Decimal | None] = mapped_column(Numeric)
+    net_edge: Mapped[Decimal | None] = mapped_column(Numeric)
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric)

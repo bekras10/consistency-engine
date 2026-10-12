@@ -25,11 +25,17 @@ from consistency_connectors.kalshi.auth import KalshiCredentialsError
 from consistency_connectors.kalshi.mapping import CatalogLoadError, load_catalog
 from consistency_connectors.kalshi.rest import HttpTransport, KalshiRestClient
 from consistency_connectors.kalshi.stream import OrderBookStream, WsTransport
+from consistency_connectors.kalshi.universe import (
+    MembershipChange,
+    diff_membership,
+    revise_relationships,
+)
 from consistency_connectors.settings import Settings
 from consistency_core.events import OrderBookSnapshotEvent, StreamMessage
 from consistency_core.models.common import DataSourceKind, MarketStatus
 from consistency_core.models.market import Catalog, Event, Market, MarketRules, Series
 from consistency_core.models.orderbook import BookValidationError
+from consistency_core.models.relationship import Relationship
 from consistency_core.normalization import normalize_rest_orderbook
 from consistency_core.ticks import PriceGrid
 
@@ -89,7 +95,12 @@ class KalshiDataSource(MarketDataSource):
         self._sleep = sleeper
         self._last_compare_ms = 0
         self._last_refresh_ms = 0
+        self._last_discovery_ms = 0
         self._compare_lock = asyncio.Lock()
+        self._relationships: list[Relationship] = []
+        self._membership_changes: list[MembershipChange] = []
+        self._relationship_revision: list[Relationship] | None = None
+        self._membership_seeded = False
 
     def _credentials_error(self, exc: KalshiCredentialsError) -> KalshiAccessRefusedError:
         return KalshiAccessRefusedError(str(exc))
@@ -108,6 +119,13 @@ class KalshiDataSource(MarketDataSource):
         self._skipped = skipped
         self._pages = pages
         self._loaded_at = datetime.now(UTC)
+        self._last_discovery_ms = self._clock()
+        if not self._membership_seeded:
+            self._membership_seeded = True
+            opened = {market.market_id: market.rules_hash for market in catalog.markets}
+            self._membership_changes.extend(
+                diff_membership({}, opened, subject_kind="market", at_ms=self._clock())
+            )
         return catalog
 
     def _stream_or_new(self) -> OrderBookStream:
@@ -226,6 +244,10 @@ class KalshiDataSource(MarketDataSource):
             ):
                 self._last_refresh_ms = now
                 await self._refresh_rules()
+            interval_ms = int(self.settings.kalshi_discovery_interval_s * 1000)
+            if interval_ms > 0 and now - self._last_discovery_ms >= interval_ms:
+                self._last_discovery_ms = now
+                await self.refresh_universe()
 
     async def _compare(self, manager: BookManager) -> None:
         assert self._catalog is not None
@@ -251,8 +273,22 @@ class KalshiDataSource(MarketDataSource):
                     continue
                 local = manager.book(ticker)
                 same = rest.yes_bids == local.yes_bids and rest.no_bids == local.no_bids
-                stream.record_mismatch(ticker, equal=same)
-                if not same and local.sync_status.value == "synchronized":
+                observed = local.observed_ts_ms
+                checked_ms = self._clock()
+                verdict = rest_book_disagreement(
+                    equal=same,
+                    book_ts_ms=observed,
+                    now_ms=checked_ms,
+                    skew_ms=self.settings.kalshi_compare_skew_ms,
+                )
+                stream.record_mismatch(
+                    ticker,
+                    equal=same,
+                    book_ts_ms=observed,
+                    age_ms=checked_ms - observed,
+                    verdict=verdict,
+                )
+                if verdict == "inconsistency" and local.sync_status.value == "synchronized":
                     stream.suspend(ticker, MarketStatus.PAUSED, "rest_mismatch")
                     await stream.request_recovery(
                         RecoveryRequest(
@@ -291,6 +327,80 @@ class KalshiDataSource(MarketDataSource):
             if isinstance(status, str) and status not in ("active", "open"):
                 stream.suspend(market.market_id, MarketStatus.CLOSED, "not_open")
 
+    def note_relationships(self, relationships: Sequence[Relationship]) -> None:
+        previous = {item.relationship_id: item.fingerprint for item in self._relationships}
+        self._relationships = list(relationships)
+        after = {item.relationship_id: item.fingerprint for item in self._relationships}
+        status = {
+            item.relationship_id: item.verification_status.value for item in self._relationships
+        }
+        self._membership_changes.extend(
+            diff_membership(
+                previous,
+                after,
+                subject_kind="relationship",
+                at_ms=self._clock(),
+                verification=status,
+            )
+        )
+
+    def drain_membership_changes(self) -> list[MembershipChange]:
+        changes = self._membership_changes
+        self._membership_changes = []
+        return changes
+
+    def take_relationship_revision(self) -> list[Relationship] | None:
+        revised = self._relationship_revision
+        self._relationship_revision = None
+        return revised
+
+    async def refresh_universe(self) -> None:
+        """Reload the catalog and record enter/exit intervals. Does not split an event."""
+        if self._catalog is None:
+            return
+        previous = {market.market_id: market.rules_hash for market in self._catalog.markets}
+        self._catalog = None
+        catalog = await self._ensure()
+        current = {market.market_id: market.rules_hash for market in catalog.markets}
+        now = self._clock()
+        self._membership_changes.extend(
+            diff_membership(previous, current, subject_kind="market", at_ms=now)
+        )
+        if self._relationships:
+            revised = revise_relationships(catalog, self._relationships, as_of=datetime.now(UTC))
+            before = {item.relationship_id: item.fingerprint for item in self._relationships}
+            after = {item.relationship_id: item.fingerprint for item in revised}
+            status = {item.relationship_id: item.verification_status.value for item in revised}
+            self._membership_changes.extend(
+                diff_membership(
+                    before,
+                    after,
+                    subject_kind="relationship",
+                    at_ms=now,
+                    verification=status,
+                )
+            )
+            changed = before != after or any(
+                old.verification_status is not new.verification_status
+                for old, new in zip(
+                    sorted(self._relationships, key=lambda item: item.relationship_id),
+                    revised,
+                    strict=False,
+                )
+            )
+            if changed or len(self._relationships) != len(revised):
+                self._relationship_revision = revised
+                self._relationships = revised
+        stream = self._stream
+        if stream is None:
+            return
+        entered = [market_id for market_id in sorted(current) if market_id not in previous]
+        exited = [market_id for market_id in sorted(previous) if market_id not in current]
+        if entered:
+            await stream.add_markets(entered)
+        if exited:
+            await stream.unsubscribe(exited)
+
     async def connectivity_check(self) -> dict[str, object]:
         """Signed GET /account/limits. Usage tier only; not a balance or a position."""
         try:
@@ -300,6 +410,20 @@ class KalshiDataSource(MarketDataSource):
         body = await self._rest.get_json("/account/limits")
         tier = body.get("usage_tier")
         return {"ok": True, "usage_tier": tier if isinstance(tier, str) else None}
+
+
+def rest_book_disagreement(*, equal: bool, book_ts_ms: int, now_ms: int, skew_ms: int) -> str:
+    """A later REST book may differ from an older WebSocket book without corruption.
+
+    ``match`` means the displayed bids are the same. ``plausible_update`` means they
+    differ and the WebSocket book is older than the allowed skew. ``inconsistency``
+    means they differ inside that bound, which is recorded and invalidates the book.
+    """
+    if equal:
+        return "match"
+    if now_ms - book_ts_ms > skew_ms:
+        return "plausible_update"
+    return "inconsistency"
 
 
 def _rules_text(raw: dict[str, object], key: str) -> str:

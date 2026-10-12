@@ -182,11 +182,12 @@ class PersistenceStore:
             enabled=persist_raw,
         )
         checkpoints = CheckpointWriter(self.sessions) if persist_raw else None
+        retain_quotes = persist_raw or source_kind != "kalshi_authorized"
         return OpenedPersistence(
             session_id=session_id,
             journal=journal,
             checkpoints=checkpoints,
-            sink=DetectionWriter(self.sessions),
+            sink=DetectionWriter(self.sessions, retain_quote_levels=retain_quotes),
             resume_from=resume,
             skip_ingest=skip_ingest,
         )

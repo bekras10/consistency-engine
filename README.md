@@ -156,10 +156,24 @@ The dashboard and `POST /api/v1/replay/sessions/{id}/start` each fork a viewer i
 Viewers do not share a cursor and do not write the canonical journal. Viewer state is
 in the gateway process. See [Limitations](docs/limitations.md).
 
-The Kalshi adapter in `packages/connectors` is a skeleton and is not activated.
-`DATA_SOURCE=kalshi_authorized` is refused unless both `ENABLE_KALSHI_API` and
-`KALSHI_AUTHORIZATION_CONFIRMED` are true. Both default to false. This repository does
-not set them.
+The Kalshi adapter is a read-only REST and WebSocket client behind the same
+book manager, verifier, fee gate, and detection pipeline. It is not a skeleton.
+It stays off unless the operator has already set `ENABLE_KALSHI_API`,
+`KALSHI_AUTHORIZATION_CONFIRMED`, `KALSHI_API_KEY_ID`, and
+`KALSHI_PRIVATE_KEY_PATH`. This repository does not set those. It does not
+place orders. `ENABLE_LIVE_TRADING=true` is rejected. Synthetic and replay
+sessions are unchanged.
+
+No 21-day study has been run, and this tree does not contain live opportunity
+results. `make kalshi-study-report` reads one `STUDY_ID` from PostgreSQL. A
+planned end date is `COMPLETE` only when stored synchronized coverage reaches
+that window. Otherwise the status is `IN_PROGRESS` or `INCOMPLETE`. Raw Kalshi
+books stay out of the journal unless
+`THIRD_PARTY_RAW_PERSISTENCE_AUTHORIZED=true`. When that flag is false,
+stored certificates omit ask ladders and consumed level ladders. They still
+keep best-ask prices, book hashes, and walk aggregates, and the certificate
+says so. Replay of that session is unavailable. The measurement definitions
+are in [docs/live-observation.md](docs/live-observation.md).
 
 ## Getting started
 

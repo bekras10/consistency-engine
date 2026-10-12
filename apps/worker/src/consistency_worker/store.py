@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import os
+import time
+from collections.abc import Mapping, Sequence
 from decimal import Decimal
 
-from consistency_connectors.settings import Settings
+from consistency_connectors.settings import DataSourceMode, Settings
 from consistency_core.serialization import sha256_of
 from consistency_persistence.retention import RetentionPolicy
 from consistency_persistence.store import OpenedPersistence, PersistenceStore
+from consistency_persistence.study_ledger import StudyLedger, episode_identity
 from consistency_worker.bootstrap import SessionInputs
 from consistency_worker.service import OpenedSession, SessionStatus, default_session_id
 
@@ -20,6 +24,8 @@ class DatabaseSessionStore:
             raise ValueError("DATABASE_URL is required")
         self._settings = settings
         self._inner = PersistenceStore(settings.database_url)
+        self._ledger = StudyLedger(self._inner.sessions)
+        self._study_id = settings.study_id
         self._policy = RetentionPolicy(
             max_age_hours=settings.retention_max_age_hours,
             max_sessions=settings.retention_max_sessions,
@@ -67,6 +73,24 @@ class DatabaseSessionStore:
                 "raw_persisted": settings.raw_market_data_persisted,
             },
         )
+        if settings.study_id and settings.data_source is DataSourceMode.KALSHI_AUTHORIZED:
+            await self._ledger.ensure_study(
+                study_id=settings.study_id,
+                source_kind=inputs.source.kind.value,
+                environment=settings.kalshi_environment,
+                commit_sha=os.environ.get("GIT_COMMIT", "unknown"),
+                config_fingerprint=inputs.fingerprint,
+                planned_start=settings.study_start,
+                planned_end=settings.study_end,
+                raw_retention_authorized=settings.third_party_raw_persistence_authorized,
+            )
+            await self._ledger.open_session(
+                study_id=settings.study_id,
+                session_id=opened.session_id,
+                source_kind=inputs.source.kind.value,
+                eligible=True,
+                started_ms=time.time_ns() // 1_000_000,
+            )
         return OpenedSession(
             session_id=opened.session_id,
             journal=opened.journal,
@@ -80,6 +104,59 @@ class DatabaseSessionStore:
         self, session_id: str, *, status: SessionStatus, detail: str | None
     ) -> None:
         await self._inner.close_session(session_id, status=status, detail=detail)
+        if self._study_id:
+            await self._ledger.close_session(
+                study_id=self._study_id,
+                session_id=session_id,
+                ended_ms=time.time_ns() // 1_000_000,
+            )
+
+    async def record_study_events(self, events: Sequence[Mapping[str, object]]) -> None:
+        if not self._study_id:
+            return
+        await self._ledger.record_events(events)
+        for event in events:
+            if event.get("kind") != "membership":
+                continue
+            payload = event.get("payload")
+            if not isinstance(payload, Mapping):
+                continue
+            action = str(payload.get("action", ""))
+            subject_kind = str(payload.get("subject_kind", ""))
+            subject_id = str(event.get("subject_id", ""))
+            occurred = event.get("occurred_ms")
+            if not isinstance(occurred, int):
+                continue
+            if action == "enter":
+                await self._ledger.enter_membership(
+                    study_id=self._study_id,
+                    session_id=str(event.get("session_id", "")),
+                    subject_kind=subject_kind,
+                    subject_id=subject_id,
+                    entered_ms=occurred,
+                    fingerprint=str(payload.get("fingerprint", "")),
+                    verification_status=str(event.get("classification", "")),
+                )
+            elif action == "exit":
+                await self._ledger.exit_membership(
+                    study_id=self._study_id,
+                    session_id=str(event.get("session_id", "")),
+                    subject_kind=subject_kind,
+                    subject_id=subject_id,
+                    exited_ms=occurred,
+                )
+
+    async def record_study_episodes(self, episodes: Sequence[Mapping[str, object]]) -> None:
+        if not self._study_id or not episodes:
+            return
+        stamped: list[dict[str, object]] = []
+        for item in episodes:
+            detection_id = str(item.get("detection_id", ""))
+            body = dict(item)
+            body["episode_id"] = episode_identity(self._study_id, detection_id)
+            body["study_id"] = self._study_id
+            stamped.append(body)
+        await self._ledger.upsert_episodes(stamped)
 
     async def save_replay(
         self,
