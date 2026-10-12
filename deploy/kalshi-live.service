@@ -1,0 +1,17 @@
+[Unit]
+Description=Consistency Engine authorized Kalshi collector
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/consistency-engine
+EnvironmentFile=/etc/consistency/kalshi.env
+ExecStart=/usr/bin/docker compose -f docker-compose.yml -f compose.kalshi.yml up -d
+ExecStop=/usr/bin/docker compose -f docker-compose.yml -f compose.kalshi.yml stop worker
+# /etc/consistency/kalshi.env is outside git. It may set the key id, the key
+# file path, and the two authorization flags. It must not live in the repo.
+
+[Install]
+WantedBy=multi-user.target

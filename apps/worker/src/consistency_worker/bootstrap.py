@@ -12,8 +12,11 @@ from consistency_connectors.sources.kalshi import KalshiDataSource
 from consistency_connectors.sources.replay import ReplayDataSource
 from consistency_connectors.sources.synthetic import SyntheticDataSource
 from consistency_core.fees import FeeCalculator, FeeScheduleRegistry
+from consistency_core.fees.calculator import FeeAssumptions, IntermediaryFees
+from consistency_core.fees.rounding import MemberClass
 from consistency_core.models.market import Catalog
 from consistency_core.models.relationship import Relationship
+from consistency_core.pricing.certificate import EvaluationConfig
 from consistency_core.relationships.discovery import discover
 from consistency_core.relationships.review import apply_reviews, load_reviews
 from consistency_core.serialization import sha256_of
@@ -32,6 +35,8 @@ class SessionInputs:
     clock ticks are injected, so the session is exactly reproducible."""
     fingerprint: str
     """Identity of the input stream + reference data (used to resume an interrupted session)."""
+    evaluation_config: EvaluationConfig | None = None
+    """Live Kalshi sessions pass explicit fee assumptions. Synthetic and replay leave this empty."""
 
 
 def relationships_for(
@@ -68,9 +73,12 @@ async def build_inputs(settings: Settings, *, fast: bool = False) -> SessionInpu
             stream_id = {"dataset": path.name, "metadata": rsrc.metadata}
             deterministic = True
         case DataSourceMode.KALSHI_AUTHORIZED:
-            # Guarded: every data method of this adapter refuses (no Kalshi network access).
-            source, label, as_of = KalshiDataSource(settings), "kalshi", datetime.now(UTC)
-            stream_id = {"live": "kalshi"}
+            source, label, as_of = (
+                KalshiDataSource(settings),
+                f"kalshi:{settings.kalshi_environment}",
+                datetime.now(UTC),
+            )
+            stream_id = {"live": "kalshi", "environment": settings.kalshi_environment}
             deterministic = False
     catalog = Catalog(
         series=tuple(await source.get_series()),
@@ -78,6 +86,21 @@ async def build_inputs(settings: Settings, *, fast: bool = False) -> SessionInpu
         markets=tuple(await source.get_markets()),
     )
     rels = relationships_for(catalog, reviews, as_of=as_of)
+    evaluation: EvaluationConfig | None = None
+    if settings.data_source is DataSourceMode.KALSHI_AUTHORIZED:
+        stream_id = {
+            "live": "kalshi",
+            "environment": settings.kalshi_environment,
+            "markets": [(market.market_id, market.rules_hash) for market in catalog.markets],
+        }
+        member = MemberClass(settings.kalshi_member_class) if settings.kalshi_member_class else None
+        evaluation = EvaluationConfig(
+            fee_assumptions=FeeAssumptions(
+                member_class=member,
+                intermediary_fees=IntermediaryFees(settings.kalshi_intermediary_fees),
+                schedule_revisions_checked=settings.kalshi_fee_schedule_revisions_checked,
+            )
+        )
     fingerprint = sha256_of(
         {
             "stream": stream_id,
@@ -85,4 +108,13 @@ async def build_inputs(settings: Settings, *, fast: bool = False) -> SessionInpu
             "fee_versions": fees.schedule_versions(),
         }
     )
-    return SessionInputs(source, catalog, rels, fees, label, deterministic, fingerprint)
+    return SessionInputs(
+        source,
+        catalog,
+        rels,
+        fees,
+        label,
+        deterministic,
+        fingerprint,
+        evaluation_config=evaluation,
+    )

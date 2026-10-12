@@ -63,6 +63,7 @@ class FeeReason(StrEnum):
     MEMBER_CLASS_UNKNOWN = "MEMBER_CLASS_UNKNOWN"
     INTERMEDIARY_FEES_UNKNOWN = "INTERMEDIARY_FEES_UNKNOWN"
     SCHEDULE_REVISIONS_NOT_CHECKED = "SCHEDULE_REVISIONS_NOT_CHECKED"
+    EVENT_FEE_OVERRIDE = "EVENT_FEE_OVERRIDE"
 
 
 class FeeResolution(FrozenModel):
@@ -177,6 +178,8 @@ class FeeCalculator:
                     reasons.append(FeeReason.INTERMEDIARY_FEES_UNKNOWN)
                 if not a.schedule_revisions_checked:
                     reasons.append(FeeReason.SCHEDULE_REVISIONS_NOT_CHECKED)
+                if market.exchange_metadata.get("fee_override_present") is True:
+                    reasons.append(FeeReason.EVENT_FEE_OVERRIDE)
         if member is None:
             member = MemberClass.NON_DIRECT
             assumed = True

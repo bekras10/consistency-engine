@@ -129,7 +129,7 @@ def _unwrap(exc: ValidationError) -> BookValidationError:
 
 @dataclass(frozen=True, slots=True)
 class FieldMap:
-    """Payload field names. Defaults = best-knowledge Kalshi fixed-point names (UNVERIFIED)."""
+    """Payload field names. Defaults match the Kalshi docs fetched 2026-10-11."""
 
     rest_container: str = "orderbook_fp"
     rest_yes: str = "yes_dollars"

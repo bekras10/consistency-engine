@@ -187,7 +187,7 @@ intermediary/FCM fees (accounted for or explicitly excluded); and confirmation t
 schedule landing page was checked for later revisions. Any gap yields `FEE_UNVERIFIED` with a
 `FEE:<reason>` code (`NO_SCHEDULE_EFFECTIVE`, `SERIES_NOT_IN_PARTIAL_TABLE`,
 `COMBO_CLASSIFICATION_UNKNOWN`, `COMBO_CLASSIFICATION_NOT_LISTED`, `MEMBER_CLASS_UNKNOWN`,
-`INTERMEDIARY_FEES_UNKNOWN`, `SCHEDULE_REVISIONS_NOT_CHECKED`, …). Timestamps before
+`INTERMEDIARY_FEES_UNKNOWN`, `SCHEDULE_REVISIONS_NOT_CHECKED`, `EVENT_FEE_OVERRIDE`, …). Timestamps before
 2026-07-07 have no stored schedule → `FEE_UNVERIFIED`. KXMVE requires a supplied combo
 classification. An estimate may still be shown when coefficients are known, but such a result
 can never be `FEE_ADJUSTED_CANDIDATE`.

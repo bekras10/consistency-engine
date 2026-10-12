@@ -174,3 +174,13 @@ job. The first attempt failed while pulling the Postgres image
 (`toomanyrequests: Data limit exceeded`) and did not run tests. The rerun's
 backend job passed, including migrations up/down/up and integration tests.
 Frontend, e2e, and Compose smoke passed on the first attempt.
+
+## Authorized Kalshi adapter
+
+The default demonstration remains synthetic. `DATA_SOURCE=kalshi_authorized`
+is a read-only connector behind the same book manager, verifier, fee gate, and
+dashboard. It does not trade. Raw books are off unless the operator sets the
+retention flag. Relationship verification is unchanged: titles do not become
+`VERIFIED`. See `docs/live-observation.md`. No live Kalshi validation and no
+21-day study are claimed by the synthetic demo in this note.
+

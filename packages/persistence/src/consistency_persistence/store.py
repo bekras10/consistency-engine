@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from consistency_core.fees import FeeCalculator
 from consistency_core.models.market import Catalog
 from consistency_core.models.relationship import Relationship
+from consistency_core.redact import redact
 from consistency_core.serialization import sha256_of
 from consistency_persistence.db import make_engine, make_sessionmaker
 from consistency_persistence.outbox import maintain_outbox
@@ -203,6 +204,22 @@ class PersistenceStore:
                     status=status,
                     checked_at=now_utc(),
                     detail={"session_id": session_id, "detail": detail},
+                )
+            )
+
+    async def record_component_health(
+        self, component: str, status: str, detail: dict[str, object]
+    ) -> None:
+        cleaned = redact(detail)
+        if not isinstance(cleaned, dict):
+            cleaned = {}
+        async with self.sessions() as session, session.begin():
+            session.add(
+                SystemHealthRow(
+                    component=component,
+                    status=status,
+                    checked_at=now_utc(),
+                    detail=cleaned,
                 )
             )
 

@@ -1,0 +1,43 @@
+# Optional authorized Kalshi profile. The default compose file stays synthetic.
+# This file does not set authorization flags to true and does not contain a key.
+#
+#   export KALSHI_PRIVATE_KEY_FILE=/absolute/path/outside/the/repo/kalshi.pem
+#   export KALSHI_API_KEY_ID=...
+#   export ENABLE_KALSHI_API=true
+#   export KALSHI_AUTHORIZATION_CONFIRMED=true
+#   export DATA_SOURCE=kalshi_authorized
+#   docker compose -f docker-compose.yml -f compose.kalshi.yml up -d
+#
+# Stop: docker compose -f docker-compose.yml -f compose.kalshi.yml down
+# The database volume from the base file is kept.
+
+services:
+  worker:
+    environment:
+      DATA_SOURCE: ${DATA_SOURCE:-kalshi_authorized}
+      ENABLE_KALSHI_API: ${ENABLE_KALSHI_API:-false}
+      KALSHI_AUTHORIZATION_CONFIRMED: ${KALSHI_AUTHORIZATION_CONFIRMED:-false}
+      THIRD_PARTY_RAW_PERSISTENCE_AUTHORIZED: ${THIRD_PARTY_RAW_PERSISTENCE_AUTHORIZED:-false}
+      ENABLE_LIVE_TRADING: "false"
+      KALSHI_ENVIRONMENT: ${KALSHI_ENVIRONMENT:-production}
+      KALSHI_API_KEY_ID: ${KALSHI_API_KEY_ID:-}
+      KALSHI_PRIVATE_KEY_PATH: /run/secrets/kalshi.key
+      KALSHI_MARKET_LIMIT: ${KALSHI_MARKET_LIMIT:-20}
+      STUDY_ID: ${STUDY_ID:-}
+      STUDY_START: ${STUDY_START:-}
+      STUDY_END: ${STUDY_END:-}
+    volumes:
+      - type: bind
+        source: ${KALSHI_PRIVATE_KEY_FILE:?set KALSHI_PRIVATE_KEY_FILE to a PEM outside the repo}
+        target: /run/secrets/kalshi.key
+        read_only: true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"

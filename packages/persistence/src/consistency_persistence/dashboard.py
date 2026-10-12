@@ -469,6 +469,26 @@ async def read_overview(session: AsyncSession, sync: dict[str, object] | None) -
     synthetic = source_kind == "synthetic" or (
         latest is not None and latest.source_label.startswith("synthetic")
     )
+    replay_available = bool(latest is not None and latest.raw_persisted and latest.deterministic)
+    feed_row = (
+        await session.execute(
+            select(SystemHealthRow)
+            .where(SystemHealthRow.component == "kalshi_feed")
+            .order_by(SystemHealthRow.checked_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if source_kind == "kalshi_authorized":
+        hint = (
+            "Authorized Kalshi session. Zero detections means no stored candidate. "
+            "Synthetic rows are not used as a fallback."
+        )
+    else:
+        hint = (
+            "PostgreSQL has no dashboard rows yet. From consistency-engine run "
+            "`make seed` and `make dev` (Postgres, migrations, synthetic worker, dashboard). "
+            "A fast synthetic session is loaded automatically when `make dev` finds no detections."
+        )
     return {
         "data_source": {
             "kind": source_kind,
@@ -478,6 +498,8 @@ async def read_overview(session: AsyncSession, sync: dict[str, object] | None) -
             "session_status": None if latest is None else latest.status,
             "deterministic": None if latest is None else latest.deterministic,
             "synthetic": synthetic,
+            "replay_available": replay_available,
+            "raw_persisted": bool(latest is not None and latest.raw_persisted),
         },
         "source_health": None
         if health is None
@@ -486,6 +508,14 @@ async def read_overview(session: AsyncSession, sync: dict[str, object] | None) -
             "status": health.status,
             "checked_at": health.checked_at.isoformat(),
             "detail": json_ready(health.detail),
+        },
+        "feed_health": None
+        if feed_row is None
+        else {
+            "component": feed_row.component,
+            "status": feed_row.status,
+            "checked_at": feed_row.checked_at.isoformat(),
+            "detail": json_ready(feed_row.detail),
         },
         "markets_monitored": market_count,
         "relationships_total": len(rel_rows),
@@ -502,11 +532,7 @@ async def read_overview(session: AsyncSession, sync: dict[str, object] | None) -
         "recent_detections": recent,
         "activity": activity_buckets([int(stamp) for _i, _s, stamp, _r in det_rows]),
         "empty": market_count == 0 and len(det_rows) == 0,
-        "seed_hint": (
-            "PostgreSQL has no dashboard rows yet. From consistency-engine run "
-            "`make seed` and `make dev` (Postgres, migrations, synthetic worker, dashboard). "
-            "A fast synthetic session is loaded automatically when `make dev` finds no detections."
-        ),
+        "seed_hint": hint,
     }
 
 
@@ -747,6 +773,18 @@ async def get_detection(session: AsyncSession, detection_id: str) -> dict[str, o
     executable = row.status in {"OPEN", "UPDATED"}
     item["executable"] = executable
     item["quote_label"] = "Open quote" if executable else "Last qualifying quote"
+    session_row = await session.get(IngestionSessionRow, row.session_id)
+    source_kind = None
+    replay_available = False
+    raw_persisted = False
+    if session_row is not None:
+        source = await session.get(DataSourceRow, session_row.data_source_id)
+        source_kind = None if source is None else source.kind
+        raw_persisted = bool(session_row.raw_persisted)
+        replay_available = bool(session_row.raw_persisted and session_row.deterministic)
+    item["source_kind"] = source_kind
+    item["replay_available"] = replay_available
+    item["raw_persisted"] = raw_persisted
     item["certificate_hash"] = row.certificate_hash
     item["proof_status"] = row.proof_status
     item["certificate_version"] = row.certificate_version

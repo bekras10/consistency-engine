@@ -9,7 +9,8 @@ PYTEST := $(UV) run --frozen pytest
 export PYTHONPATH := packages/core/src:packages/simulation/src:packages/connectors/src:packages/pipeline/src:packages/persistence/src:apps/api/src:apps/worker/src$(if $(PYTHONPATH),:$(PYTHONPATH),)
 
 .PHONY: help setup dev test test-unit test-property test-golden lint format typecheck build \
-        seed datasets replay benchmark api clean e2e demo
+        seed datasets replay benchmark api clean e2e demo \
+        kalshi-doctor kalshi-discover kalshi-run kalshi-study-report
 
 help:
 	@echo "setup      install Python workspace (uv sync)"
@@ -81,6 +82,18 @@ e2e:
 
 demo:
 	bash scripts/demo.sh
+
+kalshi-doctor:
+	$(PY) scripts/kalshi_tools.py doctor
+
+kalshi-discover:
+	$(PY) scripts/kalshi_tools.py discover
+
+kalshi-run:
+	$(PY) scripts/kalshi_tools.py run
+
+kalshi-study-report:
+	$(PY) scripts/kalshi_tools.py study-report
 
 replay:
 	$(PY) scripts/replay_session.py

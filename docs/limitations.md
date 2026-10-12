@@ -120,3 +120,15 @@ detection commit was 18.3789 ms at p50, and end-to-end was 2281.125 ms at p50
 hit only on the earlier single-process 54- and 270-market runs. Later steady-state
 medians, and the 1026- and 5022-market runs, missed it. Those measurements were not
 repeated for this document.
+
+## Authorized Kalshi collection
+
+The read-only adapter does not verify a relationship from a title. Live payloads
+that lack underlying, measurement, unit, observation window, methodology, and
+exceptional-resolution facts stay `CANDIDATE_REVIEW` or unsupported. Event
+`mutually_exclusive` is not an exhaustive partition. Fee results stay
+`FEE_UNVERIFIED` until member class, intermediary treatment, schedule revisions,
+and any event fee override are resolved. Default raw retention is off, so a
+Kalshi session cannot be bit-exactly replayed. A detection is not a fill.
+No 21-day study has been started in this repository state.
+

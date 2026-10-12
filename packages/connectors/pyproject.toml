@@ -3,7 +3,14 @@ name = "consistency-connectors"
 version = "0.1.0"
 description = "Market-data source interfaces, ingestion core, and provider adapters."
 requires-python = ">=3.12"
-dependencies = ["consistency-core", "consistency-simulation", "pydantic-settings>=2.3"]
+dependencies = [
+    "consistency-core",
+    "consistency-simulation",
+    "pydantic-settings>=2.3",
+    "httpx>=0.27",
+    "websockets>=13",
+    "cryptography>=43",
+]
 
 [tool.uv.sources]
 consistency-core = { workspace = true }

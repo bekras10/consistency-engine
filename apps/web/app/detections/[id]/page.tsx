@@ -67,6 +67,9 @@ type Detail = {
   }[];
   books: BookView[];
   certificate: unknown;
+  source_kind?: string | null;
+  replay_available?: boolean;
+  raw_persisted?: boolean;
 };
 
 function section(title: string, value: unknown) {
@@ -91,6 +94,8 @@ export default async function DetectionDetailPage({ params }: { params: Promise<
   const closed = data.executable === false;
   const quoteLabel = data.quote_label ?? (closed ? "Last qualifying quote" : "Open quote");
   const certified = data.proof_status === "certified";
+  const sourceKind = data.source_kind ?? "synthetic";
+  const replayAvailable = data.replay_available !== false && sourceKind !== "kalshi_authorized";
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -98,17 +103,28 @@ export default async function DetectionDetailPage({ params }: { params: Promise<
           <h1 className="text-xl font-medium">Detection</h1>
           <p className="font-mono text-xs text-[#9aa0a6]">{data.detection_id}</p>
         </div>
-        <Link
-          data-testid="replay-link"
-          className="rounded border border-[#3a4046] px-3 py-1 text-sm"
-          href={`/replay/${encodeURIComponent(data.session_id)}`}
-        >
-          Replay
-        </Link>
+        {replayAvailable ? (
+          <Link
+            data-testid="replay-link"
+            className="rounded border border-[#3a4046] px-3 py-1 text-sm"
+            href={`/replay/${encodeURIComponent(data.session_id)}`}
+          >
+            Replay
+          </Link>
+        ) : (
+          <p className="text-sm text-[#9aa0a6]">Replay unavailable</p>
+        )}
       </div>
-      <p data-testid="synthetic-detection" className="rounded-md border border-[#8a6a22] bg-[#2a2416] px-3 py-2 text-sm text-[#f0d48a]">
-        Synthetic simulation. This detection is from the archived recording, not a live Kalshi feed.
-      </p>
+      {sourceKind === "kalshi_authorized" ? (
+        <p data-testid="kalshi-detection" className="rounded-md border border-[#2f5d45] bg-[#15231c] px-3 py-2 text-sm text-[#c9ead8]">
+          Authorized Kalshi live feed. This detection is a stored observation, not an executed trade.
+          {closed ? " The quote is the last qualifying observation." : ""}
+        </p>
+      ) : (
+        <p data-testid="synthetic-detection" className="rounded-md border border-[#8a6a22] bg-[#2a2416] px-3 py-2 text-sm text-[#f0d48a]">
+          Synthetic simulation. This detection is from the archived recording, not a live Kalshi feed.
+        </p>
+      )}
       <p data-testid="explanation" className="max-w-3xl text-sm leading-6">{data.explanation}</p>
       {closed ? (
         <p data-testid="quote-not-executable" className="max-w-3xl text-sm">

@@ -3,6 +3,17 @@
 Source of truth: [docs/SPECIFICATION.md](docs/SPECIFICATION.md). This file holds the
 implementation plan, per-phase log, decisions, and known limitations.
 
+## Authorized Kalshi read-only adapter — 2026-10-11
+
+- The existing `KalshiDataSource` now loads markets, books, and an authenticated
+  `orderbook_delta` socket when the operator has already set both authorization
+  flags and a key file. CI fixtures do not contact Kalshi.
+- No live request was made in this change. `KALSHI_API_KEY_ID`,
+  `KALSHI_PRIVATE_KEY_PATH`, `ENABLE_KALSHI_API`, and
+  `KALSHI_AUTHORIZATION_CONFIRMED` were unset in the working environment.
+- No 21-day study was started. Reports with no window say `NOT_STARTED`.
+- Raw retention remains off unless `THIRD_PARTY_RAW_PERSISTENCE_AUTHORIZED=true`.
+
 ## Environment inspection (Phase 1, step 1.1) — 2026-10-08
 
 - Repo contained only `docs/SPECIFICATION.md`; not a git repo. Nothing to preserve.

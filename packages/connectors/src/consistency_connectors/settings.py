@@ -93,6 +93,44 @@ class Settings(BaseSettings):
         default="http://127.0.0.1:3000,http://localhost:3000", alias="CORS_ORIGINS"
     )
 
+    # Authorized Kalshi read-only connector. Empty URL fields use the documented host
+    # for kalshi_environment. These defaults do not enable the connector.
+    kalshi_environment: str = Field(default="production", alias="KALSHI_ENVIRONMENT")
+    kalshi_api_key_id: str = Field(default="", alias="KALSHI_API_KEY_ID")
+    kalshi_private_key_path: str = Field(default="", alias="KALSHI_PRIVATE_KEY_PATH")
+    kalshi_rest_base_url: str = Field(default="", alias="KALSHI_REST_BASE_URL")
+    kalshi_ws_url: str = Field(default="", alias="KALSHI_WS_URL")
+    kalshi_market_limit: int = Field(default=20, alias="KALSHI_MARKET_LIMIT")
+    kalshi_page_limit: int = Field(default=100, alias="KALSHI_PAGE_LIMIT")
+    kalshi_max_pages: int = Field(default=5, alias="KALSHI_MAX_PAGES")
+    kalshi_series_tickers: str = Field(default="", alias="KALSHI_SERIES_TICKERS")
+    kalshi_http_timeout_s: float = Field(default=10.0, alias="KALSHI_HTTP_TIMEOUT_S")
+    kalshi_max_retries: int = Field(default=5, alias="KALSHI_MAX_RETRIES")
+    kalshi_read_concurrency: int = Field(default=2, alias="KALSHI_READ_CONCURRENCY")
+    kalshi_request_token_cost: int = Field(default=10, alias="KALSHI_REQUEST_TOKEN_COST")
+    kalshi_read_token_budget: int = Field(default=200, alias="KALSHI_READ_TOKEN_BUDGET")
+    kalshi_orderbook_batch_size: int = Field(default=100, alias="KALSHI_ORDERBOOK_BATCH_SIZE")
+    kalshi_min_request_interval_s: float = Field(
+        default=0.05, alias="KALSHI_MIN_REQUEST_INTERVAL_S"
+    )
+    kalshi_ws_queue_max: int = Field(default=256, alias="KALSHI_WS_QUEUE_MAX")
+    kalshi_reconnect_base_s: float = Field(default=0.5, alias="KALSHI_RECONNECT_BASE_S")
+    kalshi_reconnect_max_s: float = Field(default=30.0, alias="KALSHI_RECONNECT_MAX_S")
+    kalshi_reconnect_attempts: int = Field(default=8, alias="KALSHI_RECONNECT_ATTEMPTS")
+    kalshi_ping_interval_s: float = Field(default=10.0, alias="KALSHI_PING_INTERVAL_S")
+    kalshi_pong_timeout_s: float = Field(default=10.0, alias="KALSHI_PONG_TIMEOUT_S")
+    kalshi_metadata_refresh_s: float = Field(default=300.0, alias="KALSHI_METADATA_REFRESH_S")
+    kalshi_book_compare_s: float = Field(default=60.0, alias="KALSHI_BOOK_COMPARE_S")
+    kalshi_member_class: str = Field(default="", alias="KALSHI_MEMBER_CLASS")
+    kalshi_intermediary_fees: str = Field(default="unknown", alias="KALSHI_INTERMEDIARY_FEES")
+    kalshi_fee_schedule_revisions_checked: bool = Field(
+        default=False, alias="KALSHI_FEE_SCHEDULE_REVISIONS_CHECKED"
+    )
+    kalshi_include_mve: bool = Field(default=False, alias="KALSHI_INCLUDE_MVE")
+    study_id: str = Field(default="", alias="STUDY_ID")
+    study_start: str = Field(default="", alias="STUDY_START")
+    study_end: str = Field(default="", alias="STUDY_END")
+
     @model_validator(mode="after")
     def _guard(self) -> Settings:
         if self.enable_live_trading:
@@ -137,6 +175,43 @@ class Settings(BaseSettings):
             raise ConfigurationError("OUTBOX_RETENTION_KEEP must be >= 0.")
         if self.trusted_proxy_count < 0:
             raise ConfigurationError("TRUSTED_PROXY_COUNT must be >= 0.")
+        if self.kalshi_environment not in ("production", "demo"):
+            raise ConfigurationError("KALSHI_ENVIRONMENT must be production or demo.")
+        if not 1 <= self.kalshi_market_limit <= 50:
+            raise ConfigurationError("KALSHI_MARKET_LIMIT must be from 1 to 50.")
+        if not 1 <= self.kalshi_page_limit <= 1000:
+            raise ConfigurationError("KALSHI_PAGE_LIMIT must be from 1 to 1000.")
+        if not 1 <= self.kalshi_max_pages <= 20:
+            raise ConfigurationError("KALSHI_MAX_PAGES must be from 1 to 20.")
+        if not 1 <= self.kalshi_orderbook_batch_size <= 100:
+            raise ConfigurationError("KALSHI_ORDERBOOK_BATCH_SIZE must be from 1 to 100.")
+        if self.kalshi_max_retries < 0 or self.kalshi_read_concurrency < 1:
+            raise ConfigurationError("Kalshi retry and concurrency bounds are invalid.")
+        if self.kalshi_request_token_cost <= 0 or self.kalshi_read_token_budget <= 0:
+            raise ConfigurationError("Kalshi token budget settings must be positive.")
+        if (
+            min(
+                self.kalshi_http_timeout_s,
+                self.kalshi_reconnect_base_s,
+                self.kalshi_pong_timeout_s,
+            )
+            <= 0
+        ):
+            raise ConfigurationError("Kalshi timeouts must be positive.")
+        if self.kalshi_reconnect_attempts < 1 or self.kalshi_reconnect_max_s <= 0:
+            raise ConfigurationError("Kalshi reconnect settings must be positive.")
+        if self.kalshi_ws_queue_max < 1:
+            raise ConfigurationError("KALSHI_WS_QUEUE_MAX must be positive.")
+        if min(self.kalshi_min_request_interval_s, self.kalshi_ping_interval_s) < 0:
+            raise ConfigurationError("Kalshi intervals must be >= 0.")
+        if min(self.kalshi_metadata_refresh_s, self.kalshi_book_compare_s) < 0:
+            raise ConfigurationError("Kalshi refresh intervals must be >= 0.")
+        if self.kalshi_member_class not in ("", "direct", "non_direct"):
+            raise ConfigurationError("KALSHI_MEMBER_CLASS must be direct, non_direct, or empty.")
+        if self.kalshi_intermediary_fees not in ("unknown", "accounted", "explicitly_excluded"):
+            raise ConfigurationError(
+                "KALSHI_INTERMEDIARY_FEES must be unknown, accounted, or explicitly_excluded."
+            )
         return self
 
     @property

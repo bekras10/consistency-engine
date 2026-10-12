@@ -59,6 +59,8 @@ export type Overview = {
     session_status: string | null;
     deterministic: boolean | null;
     synthetic: boolean;
+    replay_available?: boolean;
+    raw_persisted?: boolean;
   };
   source_health: {
     component: string;
@@ -72,6 +74,12 @@ export type Overview = {
   detections_total: number;
   detections_open: number;
   sync_health: Record<string, unknown> | null;
+  feed_health?: {
+    component: string;
+    status: string;
+    checked_at: string;
+    detail: unknown;
+  } | null;
   internal_latency_ns: { p50: number | null; p95: number | null; samples: number; stored: boolean };
   recent_detections: DetectionRow[];
   activity: { start_ms: number; count: number }[];

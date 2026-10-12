@@ -546,18 +546,20 @@ def test_kalshi_source_refuses_without_both_flags(enable: bool, confirmed: bool)
         KalshiDataSource(s)
 
 
-async def test_kalshi_skeleton_with_flags_still_performs_no_access() -> None:
+async def test_kalshi_flags_without_credentials_perform_no_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("KALSHI_API_KEY_ID", raising=False)
+    monkeypatch.delenv("KALSHI_PRIVATE_KEY_PATH", raising=False)
     s = Settings(
         DATA_SOURCE=DataSourceMode.KALSHI_AUTHORIZED,
         ENABLE_KALSHI_API=True,
         KALSHI_AUTHORIZATION_CONFIRMED=True,
     )
     src = KalshiDataSource(s)
-    assert src.get_connection_health().state is ConnectionState.DISABLED
-    with pytest.raises(NotImplementedError):
+    assert src.get_connection_health().state is ConnectionState.IDLE
+    with pytest.raises(KalshiAccessRefusedError):
         await src.get_markets()
-    with pytest.raises(NotImplementedError):
-        src.subscribe_orderbooks(["X"])
 
 
 def test_kalshi_module_imports_no_network_client() -> None:

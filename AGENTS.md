@@ -2,10 +2,12 @@
 
 ## Non-negotiable rules
 
-1. **No Kalshi network access.** Do not call `api.elections.kalshi.com`, `demo-api.kalshi.co`,
-   `trading-api.kalshi.com`, or any Kalshi WebSocket. Reading public documentation pages is fine.
-   The Kalshi adapter is refused at startup unless `ENABLE_KALSHI_API=true` **and**
-   `KALSHI_AUTHORIZATION_CONFIRMED=true`. CI must never need network access to Kalshi.
+1. **Kalshi access is opt-in and read-only.** Do not call Kalshi from CI or from a default
+   local run. The adapter may connect only when `ENABLE_KALSHI_API=true`,
+   `KALSHI_AUTHORIZATION_CONFIRMED=true`, `KALSHI_API_KEY_ID`, and
+   `KALSHI_PRIVATE_KEY_PATH` are already set by the operator. Do not set those flags in code
+   or in committed config. CI must stay on mocked HTTP and WebSocket fixtures.
+   Reading public documentation pages is fine.
 2. **No live trading.** No order placement, cancellation, or portfolio modification code.
    `ENABLE_LIVE_TRADING=true` is rejected by `Settings`.
 3. **Money is `decimal.Decimal`.** Never use `float` for prices, quantities, fees, costs, or edges.
@@ -26,7 +28,7 @@
 |---|---|
 | `packages/core` (`consistency_core`) | money, tick grids, domain models, order books, relationships, scenarios, fees, pricing, classification, certificates |
 | `packages/simulation` (`consistency_simulation`) | seeded synthetic exchange, market families, injected scenarios, event-stream faults, dataset builder |
-| `packages/connectors` (`consistency_connectors`) | settings/guards, `MarketDataSource` ABC, synthetic/replay/Kalshi-skeleton sources, local book manager, bounded queues |
+| `packages/connectors` (`consistency_connectors`) | settings/guards, `MarketDataSource` ABC, synthetic/replay sources, read-only Kalshi adapter, local book manager, bounded queues |
 | `packages/pipeline` (`consistency_pipeline`) | incremental detection, lifecycle, journal, replay, playback |
 | `packages/persistence` (`consistency_persistence`) | SQLAlchemy repository, shared by the API and the worker |
 | `apps/api` | FastAPI health endpoints (readiness pings Postgres when configured) |

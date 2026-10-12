@@ -14,6 +14,11 @@ import sys
 from datetime import UTC, datetime
 from typing import Any
 
+_PEM = re.compile(
+    r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----",
+    re.DOTALL,
+)
+_SIGNATURE = re.compile(r"(?i)(KALSHI-ACCESS-SIGNATURE:\s*)\S+")
 _URL_PASSWORD = re.compile(
     r"(?P<scheme>[a-z][a-z0-9+.-]*)://(?P<user>[^:/?#\s]+):(?P<password>[^@/?#\s]+)@"
 )
@@ -35,6 +40,9 @@ _SENSITIVE_KEYS = frozenset(
         "set-cookie",
         "database_url",
         "replay_api_token",
+        "kalshi-access-signature",
+        "private_key",
+        "signature",
     }
 )
 _RESERVED = frozenset(vars(logging.makeLogRecord({})).keys()) | {"message", "asctime"}
@@ -46,6 +54,8 @@ def redact_text(value: str) -> str:
     redacted = _COOKIE.sub("ce_replay_capability=***", redacted)
     redacted = _BEARER.sub("Bearer ***", redacted)
     redacted = _KV.sub(r"\1=***", redacted)
+    redacted = _PEM.sub("***", redacted)
+    redacted = _SIGNATURE.sub(r"\1***", redacted)
     token = os.environ.get("REPLAY_API_TOKEN", "").strip()
     if len(token) >= 4 and token in redacted:
         redacted = redacted.replace(token, "***")

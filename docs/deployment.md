@@ -181,3 +181,42 @@ A public or rented machine is a separate step. It is not done here.
    it. Leave `ENABLE_KALSHI_API` and `ENABLE_LIVE_TRADING` false unless the
    operator holds authorization and changes those flags on purpose.
 4. Keep Postgres unpublished. Do not publish the gateway.
+
+## Authorized Kalshi on a machine you already have
+
+Do not buy a server for this. A local Docker engine on an always-on computer
+is enough for a small watch list: about 1 vCPU, 1 GB RAM, and little disk
+while raw retention is off. A rented VPS at roughly $5–6 per month would also
+fit, and it was not purchased.
+
+The synthetic stack is still `docker compose up`. The Kalshi override is
+separate and fails closed:
+
+```bash
+export KALSHI_PRIVATE_KEY_FILE=/absolute/path/outside/the/repo/kalshi.pem
+export KALSHI_API_KEY_ID=your-key-id
+export ENABLE_KALSHI_API=true
+export KALSHI_AUTHORIZATION_CONFIRMED=true
+export DATA_SOURCE=kalshi_authorized
+docker compose -f docker-compose.yml -f compose.kalshi.yml up -d
+```
+
+Stop the collector without deleting the database volume:
+
+```bash
+docker compose -f docker-compose.yml -f compose.kalshi.yml stop worker
+```
+
+Check health:
+
+```bash
+docker compose -f docker-compose.yml -f compose.kalshi.yml ps
+docker compose -f docker-compose.yml -f compose.kalshi.yml logs --tail=50 worker
+```
+
+`deploy/kalshi-live.service` is a systemd template. Point it at a checkout and
+at `/etc/consistency/kalshi.env`. That file stays outside git. A process
+restart opens a new live session. It does not resume the previous session id.
+Set `THIRD_PARTY_RAW_PERSISTENCE_AUTHORIZED` only when retention is permitted.
+Leave it unset otherwise.
+

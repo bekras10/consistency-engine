@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ActivityChart } from "@/components/activity-chart";
 import { DetectionTable } from "@/components/detection-table";
 import { PollStatus, usePolled } from "@/components/polling";
-import { EmptyState, SyntheticBanner } from "@/components/states";
+import { EmptyState, SourceBanner } from "@/components/states";
 import { Card } from "@/components/ui/card";
 import type { Overview } from "@/lib/types";
 
@@ -32,13 +32,19 @@ export function OverviewView({ initial }: { initial: Overview }) {
             Source {data.data_source.label ?? "none"} · session {data.data_source.session_status ?? "none"}
           </p>
         </div>
-        {data.data_source.session_id ? (
+        {data.data_source.replay_available && data.data_source.session_id ? (
           <Link className="text-sm underline" href={`/replay/${encodeURIComponent(data.data_source.session_id)}`}>
             Replay latest session
           </Link>
+        ) : data.data_source.kind === "kalshi_authorized" ? (
+          <p className="text-sm text-[#9aa0a6]">Raw replay is unavailable for this live session.</p>
         ) : null}
       </div>
-      <SyntheticBanner show={data.data_source.synthetic} />
+      <SourceBanner
+        synthetic={data.data_source.synthetic}
+        kind={data.data_source.kind}
+        replayAvailable={data.data_source.replay_available === true}
+      />
       {data.empty ? <EmptyState hint={data.seed_hint} /> : null}
       <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
         <Stat label="Markets monitored" value={String(data.markets_monitored)} />
@@ -57,9 +63,15 @@ export function OverviewView({ initial }: { initial: Overview }) {
           <p className="mt-2 text-sm text-[#c5cad0]">
             Sync{" "}
             {sync
-              ? `${String(sync.synchronized ?? "—")} synchronized / ${String(sync.total ?? "—")} books`
+              ? `${String(sync.synchronized ?? "—")} synchronized / ${String(sync.unsynchronized ?? "—")} unsynchronized / ${String(sync.total ?? "—")} books`
               : "No journal book state is available."}
           </p>
+          {data.feed_health ? (
+            <p className="mt-2 text-sm text-[#c5cad0]" data-testid="feed-health">
+              Feed {data.feed_health.status} at {data.feed_health.checked_at}. Reconnects and gaps
+              are in the feed record. Zero open detections is a measured zero, not a placeholder.
+            </p>
+          ) : null}
         </Card>
         <Card className="p-3">
           <h2 className="text-sm font-medium">Internal processing latency</h2>

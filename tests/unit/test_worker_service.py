@@ -502,6 +502,8 @@ async def test_worker_stop_on_deterministic_source_leaves_session_resumable() ->
 
 
 def test_kalshi_source_stays_refused_by_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("KALSHI_API_KEY_ID", raising=False)
+    monkeypatch.delenv("KALSHI_PRIVATE_KEY_PATH", raising=False)
     monkeypatch.setenv("DATA_SOURCE", "kalshi_authorized")
     monkeypatch.setenv("ENABLE_KALSHI_API", "true")
     monkeypatch.setenv("KALSHI_AUTHORIZATION_CONFIRMED", "true")

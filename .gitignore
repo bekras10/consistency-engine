@@ -28,6 +28,9 @@ node_modules/
 .next/
 apps/web/out/
 
+# Derived research output. May contain market identifiers. Not raw books by default.
+reports/
+
 # OS / editors
 .DS_Store
 .idea/

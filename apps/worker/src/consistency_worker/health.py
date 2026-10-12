@@ -40,7 +40,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from consistency_persistence.schema import IngestionSessionRow
+from consistency_persistence.schema import IngestionSessionRow, SystemHealthRow
 from consistency_persistence.store import PersistenceStore
 
 log = logging.getLogger("consistency.worker.health")
@@ -323,8 +323,26 @@ def assess_health(
     return label, code
 
 
+def assess_feed(
+    *,
+    state: str | None,
+    checked_at_epoch: float | None,
+    now: float,
+    max_age_s: float,
+) -> tuple[str, int]:
+    """Freshness of the authorized Kalshi feed. A missing row is startup, not a failure."""
+    if state is None or checked_at_epoch is None:
+        return "feed_starting", 0
+    if state in {"authentication_failed", "disconnected"}:
+        return "feed_down", 1
+    if now - checked_at_epoch > max_age_s:
+        return "feed_stale", 1
+    return "feed_ok", 0
+
+
 async def report_health(url: str) -> tuple[str, int]:
     store = PersistenceStore(url)
+    feed_verdict: tuple[str, int] | None = None
     try:
         async with store.sessions() as session:
             status = await session.scalar(
@@ -335,6 +353,25 @@ async def report_health(url: str) -> tuple[str, int]:
                 )
                 .limit(1)
             )
+            if os.environ.get("DATA_SOURCE") == "kalshi_authorized" and status == "running":
+                row = await session.scalar(
+                    select(SystemHealthRow)
+                    .where(SystemHealthRow.component == "kalshi_feed")
+                    .order_by(SystemHealthRow.checked_at.desc())
+                    .limit(1)
+                )
+                if row is None:
+                    feed_verdict = ("feed_starting", 0)
+                else:
+                    detail = row.detail if isinstance(row.detail, dict) else {}
+                    raw_state = detail.get("state")
+                    state = raw_state if isinstance(raw_state, str) else row.status
+                    feed_verdict = assess_feed(
+                        state=state,
+                        checked_at_epoch=row.checked_at.timestamp(),
+                        now=time.time(),
+                        max_age_s=stale_after_s(),
+                    )
     except Exception:
         log.warning("worker health could not read ingestion status")
         return "unhealthy", 1
@@ -344,7 +381,7 @@ async def report_health(url: str) -> tuple[str, int]:
     required = expect_maintenance()
     beat = read_heartbeat(heartbeat_path()) if required else Heartbeat(None, None, None)
     alive = pid_is_alive(beat.pid) if beat.pid is not None else None
-    return assess_health(
+    verdict = assess_health(
         session_status,
         expect_maintenance=required,
         heartbeat_epoch=beat.epoch,
@@ -359,3 +396,6 @@ async def report_health(url: str) -> tuple[str, int]:
         success_max_age_s=success_max_age_s(),
         startup_grace_s=startup_grace_s(),
     )
+    if verdict[1] == 0 and feed_verdict is not None and feed_verdict[1] != 0:
+        return feed_verdict
+    return verdict

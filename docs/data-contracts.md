@@ -21,6 +21,29 @@ All pages marked unverified must be read and this document corrected before the 
 connector is enabled. Every assumed field name is centralised in
 `consistency_core.normalization.FieldMap`, so corrections are a one-place change.
 
+## Documentation access log (2026-10-11)
+
+The pages below were fetched from docs.kalshi.com. No trading endpoint was called.
+`FieldMap` defaults match those pages: REST `orderbook_fp.yes_dollars` / `no_dollars`,
+WebSocket `yes_dollars_fp` / `no_dollars_fp`, and delta `price_dollars` / `delta_fp` / `side`.
+Sequence numbers are per subscription id. Production and demo hosts are listed in
+`consistency_connectors.kalshi.endpoints`.
+
+| Page | Status |
+|---|---|
+| getting_started/quick_start_market_data | Fetched. Public market data, fixed-point books, bids only. |
+| getting_started/quick_start_websockets | Fetched. `wss://external-api-ws.kalshi.com/trade-api/ws/v2`. |
+| getting_started/api_keys | Fetched. Key id header, timestamp, Ed25519 or RSA-PSS signature. |
+| websockets/orderbook-updates | Fetched. `orderbook_delta` subscribe, snapshot, delta, sid, seq. |
+| getting_started/orderbook_responses | Fetched. Dollar strings and `count_fp`. |
+| getting_started/fixed_point_migration | Fetched. Decimal prices and fractional quantities. |
+| getting_started/rate_limits | Fetched. Basic read budget, 429 without Retry-After. |
+| api-reference/market/get-markets | Fetched. Cursor pagination, limit max 1000. |
+| api-reference/market/get-multiple-market-orderbooks | Fetched. Exploded `tickers`, max 100. |
+
+Sustained collection, raw retention, screenshots, and redistribution are not granted by
+those technical pages. See `docs/live-observation.md` and `docs/compliance.md`.
+
 ## Numeric conventions
 
 | Quantity | Representation | Validation |
@@ -34,7 +57,7 @@ connector is enabled. Every assumed field name is centralised in
 Floats are refused by `consistency_core.money.dec` and by every Pydantic money field. JSON output
 uses fixed-point strings (`format(d, "f")`), never JSON numbers and never exponent notation.
 
-## Assumed Kalshi field names (UNVERIFIED best knowledge)
+## Assumed Kalshi field names (confirmed against docs fetched 2026-10-11)
 
 ### REST order book
 

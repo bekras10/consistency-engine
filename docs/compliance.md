@@ -9,7 +9,7 @@ relationships between contracts, and reports evidence. It does **not** trade.
 |---|---|---|
 | `synthetic` (default) | Deterministic synthetic exchange (`consistency_simulation`) | none |
 | `replay` | Plays a recorded dataset directory (`REPLAY_DATASET_PATH`), sha-verified | none |
-| `kalshi_authorized` | Reserved for an authorized Kalshi connector (milestone 4) | none in milestone 1 |
+| `kalshi_authorized` | Read-only Kalshi REST and `orderbook_delta` WebSocket, bounded to a small market set | only after both authorization flags and credentials are set |
 
 Every bundled dataset is **synthetic** and says so in its metadata (`"synthetic": true` plus a
 disclaimer). Markets carry a `Provenance` (`SYNTHETIC`, `REPLAY`, `KALSHI_AUTHORIZED`) that the
@@ -22,11 +22,15 @@ fee calculator uses to choose the fictional or the real schedule.
 - `DATA_SOURCE=kalshi_authorized` is refused unless **both** `ENABLE_KALSHI_API=true` and
   `KALSHI_AUTHORIZATION_CONFIRMED=true`. The operator setting the second flag asserts that they
   hold the necessary authorization.
-- Even with both flags, the milestone-1 `KalshiDataSource` is a skeleton: every data method
-  raises `NotImplementedError` and the module imports no network client (tested).
-- No Kalshi API endpoint (REST or WebSocket, production or demo) was contacted while building
-  this milestone. Only public documentation pages were consulted, and most of those were not
-  fetched at all (see `docs/data-contracts.md`, documentation access log).
+- Even with both flags, missing `KALSHI_API_KEY_ID` or `KALSHI_PRIVATE_KEY_PATH` raises
+  `KalshiAccessRefusedError` before any socket. The HTTP client allows GET only, and only
+  market, event, series, exchange status/schedule, and `GET /account/limits`. Portfolio,
+  order, and balance paths are rejected in code.
+- Raw Kalshi books stay out of PostgreSQL unless `THIRD_PARTY_RAW_PERSISTENCE_AUTHORIZED=true`.
+  The default report omits provider order books. Public technical access is not the same
+  as permission to retain, screenshot, or redistribute Kalshi data. The operator has to
+  confirm the Developer Agreement before setting the flags. This repository does not
+  grant that permission.
 
 ## Kalshi Developer Agreement
 

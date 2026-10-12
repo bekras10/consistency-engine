@@ -137,11 +137,36 @@ class WorkerService:
             _, update = await updates.get()
             self.broker.publish(MARKET_TOPIC, market_update_payload(update, manager))
 
-    async def _ticker(self, listener: PipelineListener) -> None:
+    async def _ticker(
+        self, listener: PipelineListener, inputs: SessionInputs, manager: BookManager
+    ) -> None:
         interval = self.settings.sweep_interval_ms / 1000
+        last_maintenance = 0
         while True:
             await self._sleep(interval)
-            await listener.tick(self._wall_ms())
+            now = self._wall_ms()
+            await listener.tick(now)
+            if now - last_maintenance < 5000:
+                continue
+            last_maintenance = now
+            try:
+                await self._record_feed(inputs)
+                consider = getattr(inputs.source, "consider_maintenance", None)
+                if callable(consider):
+                    await consider(manager)
+            except Exception:
+                log.warning("live feed maintenance failed")
+
+    async def _record_feed(self, inputs: SessionInputs) -> None:
+        status_fn = getattr(inputs.source, "feed_status", None)
+        record = None
+        if self.store is not None:
+            record = getattr(self.store, "record_component_health", None)
+        if not callable(status_fn) or not callable(record):
+            return
+        detail = status_fn()
+        if isinstance(detail, dict):
+            await record("kalshi_feed", str(detail.get("state", "unknown")), detail)
 
     async def run(self, stop: asyncio.Event | None = None) -> WorkerResult:
         s = self.settings
@@ -181,6 +206,7 @@ class WorkerService:
                 inputs.fees,
                 session_id=opened.session_id,
                 sweep_interval_ms=s.sweep_interval_ms,
+                config=inputs.evaluation_config,
             )
             start_ordinal = 0
         outbox = Outbox(opened.sink, self.broker, maxsize=s.outbox_maxsize)
@@ -252,7 +278,9 @@ class WorkerService:
             asyncio.create_task(self._feed(updates, manager), name="market-feed"),
         ]
         if not inputs.deterministic:
-            background.append(asyncio.create_task(self._ticker(listener), name="ticker"))
+            background.append(
+                asyncio.create_task(self._ticker(listener, inputs, manager), name="ticker")
+            )
         sup_task = asyncio.create_task(supervisor.run(), name="supervisor")
         stop_task = asyncio.create_task(stop.wait(), name="stop")
         self.started.set()

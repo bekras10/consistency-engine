@@ -15,6 +15,14 @@ to walk the book, minus fees. Each detection stores its certificate. The default
 configuration does not call Kalshi. A synthetic detection tests this pipeline. It is
 not a measurement of a live market.
 
+An authorized Kalshi mode exists and stays off until the operator sets both
+authorization flags and points `KALSHI_PRIVATE_KEY_PATH` at a PEM file outside
+this repository. That mode is read-only. It does not place orders. Raw Kalshi
+books are not stored unless a separate retention flag is set. The method, the
+fee limits, and the commands are in
+[docs/live-observation.md](docs/live-observation.md). No 21-day study is
+started by cloning this repository.
+
 This is an independent open-source project. It is not an official Kalshi product and
 it is not endorsed by Kalshi. The delivery note for this build is
 [docs/DELIVERY.md](docs/DELIVERY.md).

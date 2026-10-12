@@ -47,6 +47,39 @@ export function SyntheticBanner({ show }: { show: boolean }) {
   );
 }
 
+export function SourceBanner({
+  synthetic,
+  kind,
+  replayAvailable,
+}: {
+  synthetic: boolean;
+  kind: string | null;
+  replayAvailable: boolean;
+}) {
+  if (kind === "kalshi_authorized") {
+    return (
+      <div
+        data-testid="kalshi-banner"
+        className="rounded-md border border-[#2f5d45] bg-[#15231c] px-3 py-2 text-sm text-[#c9ead8]"
+      >
+        Authorized Kalshi live feed. Figures are observed quotes, not orders and not executed
+        trades. Raw replay is {replayAvailable ? "available" : "unavailable"}.
+      </div>
+    );
+  }
+  if (kind === "replay") {
+    return (
+      <div
+        data-testid="replay-banner"
+        className="rounded-md border border-[#3a4046] px-3 py-2 text-sm text-[#c5cad0]"
+      >
+        Historical replay. This is archived data, not a live Kalshi feed.
+      </div>
+    );
+  }
+  return <SyntheticBanner show={synthetic} />;
+}
+
 export function gate<T>(result: Envelope<T>): { ok: true; data: T } | { ok: false; node: React.ReactNode } {
   if (!result.ok) {
     return { ok: false, node: <Unavailable error={result.error} detail={result.detail} /> };
