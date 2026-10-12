@@ -170,15 +170,56 @@ async def test_corrupt_update_does_not_replace_a_matching_certificate(db: str) -
         await store.aclose()
 
 
-async def test_classification_facet_lists_classes_outside_the_filter(db: str) -> None:
+async def test_classification_contradicting_the_certificate_is_not_persisted(db: str) -> None:
     opened, _updated = _events()
-    other = opened.model_copy(
+    assert opened.record.certificate_json is not None
+    contradicted = opened.model_copy(
         update={
             "record": opened.record.model_copy(
-                update={
-                    "detection_id": f"{opened.record.detection_id}-other",
-                    "classification": Classification.THEORETICAL_ONLY,
-                }
+                update={"classification": Classification.THEORETICAL_ONLY}
+            )
+        }
+    )
+    assert contradicted.record.classification is not opened.record.classification
+    store, session_id, sink = await _session(db, "class-mismatch")
+    try:
+        with pytest.raises(ValueError, match="classification"):
+            await sink.write([_retarget(contradicted, session_id)])
+        detections, outbox = await _counts(store, session_id)
+        assert detections == 0
+        assert outbox == 0
+    finally:
+        await store.aclose()
+
+
+async def test_relationship_contradicting_the_certificate_is_not_persisted(db: str) -> None:
+    opened, _updated = _events()
+    contradicted = opened.model_copy(
+        update={
+            "record": opened.record.model_copy(
+                update={"relationship_id": f"{opened.record.relationship_id}-other"}
+            )
+        }
+    )
+    store, session_id, sink = await _session(db, "rel-mismatch")
+    try:
+        with pytest.raises(ValueError, match="relationship"):
+            await sink.write([_retarget(contradicted, session_id)])
+        detections, outbox = await _counts(store, session_id)
+        assert detections == 0
+        assert outbox == 0
+    finally:
+        await store.aclose()
+
+
+async def test_classification_facet_lists_classes_outside_the_filter(db: str) -> None:
+    opened, updated = _events()
+    assert opened.record.classification is not updated.record.classification
+    assert opened.record.certificate_json != updated.record.certificate_json
+    other = updated.model_copy(
+        update={
+            "record": updated.record.model_copy(
+                update={"detection_id": f"{updated.record.detection_id}-other"}
             )
         }
     )
@@ -194,7 +235,7 @@ async def test_classification_facet_lists_classes_outside_the_filter(db: str) ->
         assert shown == {opened.record.detection_id}
         assert set(listed["classifications"]) == {
             opened.record.classification.value,
-            Classification.THEORETICAL_ONLY.value,
+            other.record.classification.value,
         }
     finally:
         await store.aclose()

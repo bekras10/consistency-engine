@@ -216,11 +216,14 @@ class DetectionWriter:
 
 
 def _require_proof_hash(rec: DetectionRecord) -> None:
-    """Refuse a write whose hash and certificate bytes are not the same snapshot.
+    """Refuse a write whose stored detection disagrees with its qualifying proof.
 
-    A new qualifying detection has no row until both the JSON and its SHA-256 are
-    present and equal. An update that fails this check raises before any column
-    changes, so the transaction rolls the whole batch back.
+    The hash and the certificate bytes must be the same snapshot, and the
+    identity columns copied from that proof (classification, relationship,
+    strategy, template, reason codes, certificate version, and the quoted
+    metrics) must match it. A new qualifying detection has no row until that
+    check passes. An update that fails raises before any column changes, so
+    the transaction rolls the whole batch back.
     """
     if rec.certificate_json is None:
         raise ValueError(f"{rec.detection_id} qualifying certificate JSON is missing")
@@ -229,13 +232,80 @@ def _require_proof_hash(rec: DetectionRecord) -> None:
         raise ValueError(f"{rec.detection_id} certificate hash does not match certificate JSON")
     closing_json = rec.closing_certificate_json
     closing_hash = rec.closing_certificate_hash
-    if closing_json is None and closing_hash is None:
-        return
-    if closing_json is None or closing_hash is None:
+    if (closing_json is None) ^ (closing_hash is None):
         raise ValueError(f"{rec.detection_id} closing certificate is missing half of its pair")
-    closing = "sha256:" + hashlib.sha256(closing_json.encode()).hexdigest()
-    if closing != closing_hash:
-        raise ValueError(f"{rec.detection_id} closing certificate hash does not match its JSON")
+    if closing_json is not None and closing_hash is not None:
+        closing = "sha256:" + hashlib.sha256(closing_json.encode()).hexdigest()
+        if closing != closing_hash:
+            raise ValueError(f"{rec.detection_id} closing certificate hash does not match its JSON")
+    _require_certificate_identity(rec, rec.certificate_json)
+
+
+def _same_figure(stored: object, expected: object) -> bool:
+    if stored is None and expected is None:
+        return True
+    if stored is None or expected is None:
+        return False
+    if isinstance(stored, int) and isinstance(expected, int):
+        return stored == expected
+    try:
+        return Decimal(str(stored)) == Decimal(str(expected))
+    except (ArithmeticError, ValueError):
+        return False
+
+
+def _require_certificate_identity(rec: DetectionRecord, document: str) -> None:
+    """The detection row quotes these fields from the qualifying certificate."""
+    try:
+        cert = ProofCertificate.model_validate_json(document)
+    except ValueError as exc:
+        raise ValueError(f"{rec.detection_id} qualifying certificate is not a proof") from exc
+    if cert.classification != rec.classification:
+        raise ValueError(
+            f"{rec.detection_id} classification {rec.classification.value} "
+            f"contradicts the certificate classification {cert.classification.value}"
+        )
+    if cert.relationship.relationship_id != rec.relationship_id:
+        raise ValueError(
+            f"{rec.detection_id} relationship {rec.relationship_id} "
+            f"contradicts the certificate relationship {cert.relationship.relationship_id}"
+        )
+    if cert.portfolio.strategy_id != rec.strategy_id:
+        raise ValueError(
+            f"{rec.detection_id} strategy {rec.strategy_id} "
+            f"contradicts the certificate strategy {cert.portfolio.strategy_id}"
+        )
+    if cert.portfolio.template.value != rec.template:
+        raise ValueError(
+            f"{rec.detection_id} template {rec.template} "
+            f"contradicts the certificate template {cert.portfolio.template.value}"
+        )
+    if tuple(cert.reason_codes) != tuple(rec.reason_codes):
+        raise ValueError(f"{rec.detection_id} reason codes contradict the certificate")
+    if rec.certificate_version is not None and rec.certificate_version != cert.certificate_version:
+        raise ValueError(f"{rec.detection_id} certificate version contradicts the certificate")
+    evaluation = cert.evaluation
+    top = cert.top_of_book
+    capacity = cert.capacity
+    quoted: dict[str, object] = {
+        "theoretical_deviation": None if top is None else top.pre_fee_edge_per_unit,
+        "gross_edge": None if evaluation is None else evaluation.gross_profit,
+        "total_fees": None if evaluation is None else evaluation.total_net_fees,
+        "net_edge": None if evaluation is None else evaluation.net_profit,
+        "execution_adjusted_edge": None
+        if evaluation is None
+        else evaluation.execution_adjusted_profit,
+        "reported_quantity": None if evaluation is None else evaluation.quantity,
+        "depth_supported_quantity": None if capacity is None else capacity.max_supported_quantity,
+        "worst_case_payoff": None if evaluation is None else evaluation.min_payoff,
+        "timestamp_skew_ms": cert.timing.cross_market_skew_ms,
+        "data_freshness_ms": cert.timing.max_book_age_ms,
+        "observed_duration_ms": cert.timing.observed_duration_ms,
+    }
+    for key, expected in quoted.items():
+        actual = getattr(rec.metrics, key)
+        if not _same_figure(actual, expected):
+            raise ValueError(f"{rec.detection_id} {key} contradicts the certificate")
 
 
 async def _apply_event(session: AsyncSession, ev: DetectionEvent) -> None:

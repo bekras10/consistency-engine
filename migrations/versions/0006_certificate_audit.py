@@ -12,9 +12,12 @@ verified checkpoint reproduces that same stored hash and agrees with the row's
 classification and any stored metrics, legs, and scenarios. The original hash
 is not rewritten. Anything that cannot be linked is marked uncertified and kept.
 
-Each affected detection is one savepoint. A failure quarantines that row and
-does not roll back detections already certified in earlier savepoints, and it
-does not abort the migration. Checkpoints are paged per affected session.
+Each affected detection is one savepoint. A repair failure quarantines that
+row and does not roll back detections already certified in earlier savepoints.
+If the quarantine write also fails, this upgrade raises and Alembic aborts
+the revision. Checkpoints are paged per affected session. A displaced document
+is stored as the closing proof only when it is a well-formed certificate
+whose hash is the SHA-256 of those bytes.
 """
 
 from __future__ import annotations

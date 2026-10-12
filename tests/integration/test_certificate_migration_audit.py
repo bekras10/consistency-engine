@@ -791,3 +791,229 @@ async def test_one_detection_failure_does_not_undo_an_earlier_certified_repair(
     assert failed["proof_status"] == "uncertified"
     assert failed["certificate_hash"] == qualifying_hash
     assert failed["certificate_json"] == closing
+
+
+async def _insert_mismatched(
+    db: str,
+    *,
+    session_id: str,
+    detection_id: str,
+    source_id: str,
+    certificate_json: str,
+    certificate_hash: str,
+    checkpoint: tuple[str, str] | None,
+) -> None:
+    now = datetime.now(UTC)
+    engine = make_engine(db)
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                """
+                INSERT INTO data_sources (data_source_id, name, kind, created_at)
+                VALUES (:source_id, :source_id, 'synthetic', :now)
+                """
+            ),
+            {"source_id": source_id, "now": now},
+        )
+        await conn.execute(
+            text(
+                """
+                INSERT INTO ingestion_sessions (
+                    session_id, data_source_id, status, fingerprint, source_label,
+                    deterministic, pinned, raw_persisted, started_at
+                ) VALUES (
+                    :sid, :source_id, 'completed', :fingerprint, 'synthetic:audit',
+                    true, false, true, :now
+                )
+                """
+            ),
+            {
+                "sid": session_id,
+                "source_id": source_id,
+                "fingerprint": f"sha256:{session_id}",
+                "now": now,
+            },
+        )
+        await conn.execute(
+            text(
+                """
+                INSERT INTO detections (
+                    detection_id, session_id, relationship_id, strategy_id, template,
+                    ordinal, status, classification, peak_classification, reason_codes,
+                    first_observed_at, last_observed_at, first_observed_ms, last_observed_ms,
+                    first_position, last_position, event_count, certificate_hash,
+                    certificate_json, record_json
+                ) VALUES (
+                    :detection_id, :sid, 'rel-audit', 'strat-audit', 'implication',
+                    1, 'EXPIRED', 'FEE_ADJUSTED_CANDIDATE', 'FEE_ADJUSTED_CANDIDATE',
+                    CAST('[]' AS jsonb),
+                    :now, :now, 1, 2, 1, 2, 2, :cert_hash, :cert_json,
+                    CAST(:record_json AS jsonb)
+                )
+                """
+            ),
+            {
+                "detection_id": detection_id,
+                "sid": session_id,
+                "now": now,
+                "cert_hash": certificate_hash,
+                "cert_json": certificate_json,
+                "record_json": json.dumps({"detection_id": detection_id}),
+            },
+        )
+        if checkpoint is not None:
+            digest, payload = checkpoint
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO session_checkpoints (
+                        session_id, ordinal, now_ms, source_position, state_digest,
+                        checkpoint_json, created_at
+                    ) VALUES (
+                        :sid, 1, 1, 1, :digest, CAST(:payload AS jsonb), :now
+                    )
+                    """
+                ),
+                {"sid": session_id, "digest": digest, "payload": payload, "now": now},
+            )
+    await engine.dispose()
+
+
+async def test_failed_repair_and_failed_quarantine_abort_the_audit(
+    db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A repair fault plus a failed quarantine write must abort, not stay certified."""
+    session_id = "ses-audit-abort"
+    detection_id = "det-audit-abort"
+    await _insert_mismatched(
+        db,
+        session_id=session_id,
+        detection_id=detection_id,
+        source_id="src-abort",
+        certificate_json='{"not":"a proof"}',
+        certificate_hash="sha256:" + "cd" * 32,
+        checkpoint=None,
+    )
+    from consistency_persistence import certificate_audit
+
+    def _fail_repair(_connection: object, _row: object, _replayed: dict[str, str]) -> None:
+        raise RuntimeError("injected repair failure")
+
+    def _fail_quarantine(connection: object, detection: str) -> None:
+        connection.execute(  # type: ignore[attr-defined]
+            text(
+                """
+                UPDATE detections
+                SET proof_status = :status
+                WHERE detection_id = :detection_id AND absent_column = 'x'
+                """
+            ),
+            {"detection_id": detection, "status": "uncertified"},
+        )
+
+    monkeypatch.setattr(certificate_audit, "_repair_row", _fail_repair)
+    monkeypatch.setattr(certificate_audit, "_quarantine", _fail_quarantine)
+    engine = make_engine(db)
+    try:
+        with pytest.raises(Exception, match="quarantine"):
+            async with engine.begin() as conn:
+                await conn.run_sync(_run_audit)
+    finally:
+        await engine.dispose()
+    row = (await _rows(db, session_id))[detection_id]
+    assert row["proof_status"] == "certified"
+    assert row["certificate_json"] == '{"not":"a proof"}'
+    assert row["certificate_hash"] == "sha256:" + "cd" * 32
+
+
+async def test_unrecoverable_row_is_quarantined_without_aborting(db: str) -> None:
+    session_id = "ses-audit-plain-quarantine"
+    detection_id = "det-audit-plain-quarantine"
+    stored_json = '{"not":"linked"}'
+    stored_hash = "sha256:" + "ef" * 32
+    await _insert_mismatched(
+        db,
+        session_id=session_id,
+        detection_id=detection_id,
+        source_id="src-plain-quarantine",
+        certificate_json=stored_json,
+        certificate_hash=stored_hash,
+        checkpoint=None,
+    )
+    engine = make_engine(db)
+    async with engine.begin() as conn:
+        await conn.run_sync(_run_audit)
+    await engine.dispose()
+    row = (await _rows(db, session_id))[detection_id]
+    assert row["proof_status"] == "uncertified"
+    assert row["certificate_json"] == stored_json
+    assert row["certificate_hash"] == stored_hash
+
+
+async def test_malformed_displaced_document_is_not_a_certified_closing_proof(db: str) -> None:
+    _harness, closed = _close_case("EXPIRED")
+    qualifying = closed.record.certificate_json
+    assert qualifying is not None
+    qualifying_hash = closed.record.certificate_hash
+    malformed = "{not-a-closing-proof"
+    assert _digest(malformed) != qualifying_hash
+    session_id = "ses-audit-displaced"
+    detection_id = "det-audit-displaced"
+    digest, payload = _checkpoint(
+        session_id,
+        {
+            "kept": {
+                "detection": {
+                    "detection_id": detection_id,
+                    "certificate_json": qualifying,
+                    "certificate_hash": qualifying_hash,
+                }
+            }
+        },
+    )
+    await _insert_mismatched(
+        db,
+        session_id=session_id,
+        detection_id=detection_id,
+        source_id="src-displaced",
+        certificate_json=malformed,
+        certificate_hash=qualifying_hash,
+        checkpoint=(digest, payload),
+    )
+    engine = make_engine(db)
+    async with engine.begin() as conn:
+        await conn.run_sync(_run_audit)
+    await engine.dispose()
+    engine = make_engine(db)
+    async with engine.connect() as conn:
+        found = (
+            (
+                await conn.execute(
+                    text(
+                        """
+                        SELECT proof_status, certificate_hash, certificate_json,
+                               closing_certificate_hash, closing_certificate_json,
+                               closing_classification, record_json
+                        FROM detections
+                        WHERE detection_id = :detection_id
+                        """
+                    ),
+                    {"detection_id": detection_id},
+                )
+            )
+            .mappings()
+            .one()
+        )
+    await engine.dispose()
+    assert found["proof_status"] == "certified"
+    assert found["certificate_json"] == qualifying
+    assert found["certificate_hash"] == qualifying_hash
+    assert _digest(str(found["certificate_json"])) == found["certificate_hash"]
+    assert found["closing_certificate_hash"] is None
+    assert found["closing_certificate_json"] is None
+    assert found["closing_classification"] is None
+    record = found["record_json"]
+    assert isinstance(record, dict)
+    assert record.get("displaced_document") == malformed
+    assert record.get("closing_certificate_json") is None
+    assert record.get("closing_certificate_hash") is None

@@ -1160,3 +1160,42 @@ https://github.com/bekras10/consistency-engine/actions/runs/38189685534
 finished with conclusion `success`. Jobs: backend (4m11s), frontend (56s),
 e2e (3m34s), and compose (2m33s, Compose smoke succeeded).
 
+## Final hardening — 2026-10-11
+
+Not a new phase. No features, no Kalshi connector, and no public deploy. Golden
+expected values were not edited. The synthetic demo was not re-recorded.
+
+A stored detection must agree with its qualifying certificate, including
+classification and the other identity fields copied from that proof.
+`test_classification_contradicting_the_certificate_is_not_persisted` and
+`test_relationship_contradicting_the_certificate_is_not_persisted` did not
+raise before the check. The classification facet still lists classes outside
+the active filter, using two consistent rows.
+`test_failed_repair_and_failed_quarantine_abort_the_audit` did not raise
+before the change; if the quarantine write fails, revision 0006 now aborts.
+An unrecoverable row is still marked `uncertified`. A malformed displaced
+document is kept on the record for investigation and is not stored as a
+closing proof. `test_malformed_displaced_document_is_not_a_certified_closing_proof`
+previously certified a closing hash of those bytes. The qualifying repair can
+still be `certified`.
+
+The host database port is 5433. `compose.host-db.yml` publishes
+`127.0.0.1:${POSTGRES_PORT:-5432}`, and [deployment.md](docs/deployment.md)
+uses `POSTGRES_PORT` 5433 on this machine so tests do not touch PostgreSQL 17
+on 5432. `docs/DELIVERY.md` now sets `POSTGRES_PORT=5433` on the startup
+command, matching the `DATABASE_URL` example. The compose default stays 5432.
+
+Host Postgres `127.0.0.1:5433`. Port 5432 was not modified. `make lint` clean.
+`make typecheck` clean, 90 source files. `make test` 519 passed, 0 failed, in
+188.64s. Suites: unit 366, golden 34, property 24, replay 16, integration 79.
+`alembic upgrade head`, `downgrade base`, `upgrade head` ended at
+`0006_certificate_audit`. Frontend was not changed, so eslint, tsc, and vitest
+were not rerun. `bash scripts/compose_smoke.sh` on project
+`consistency-smoke-local-98882` printed the qualifying hash match for
+`sha256:0240383b5da7dea8aeb28ce478bd6e9655c5aa31468692fe1b938e0ebfb107fd`,
+replay cursor `981/12277` for `det-f26eee89fc522826ab5d90f1`, and
+`compose smoke passed: 12 detections, 1 completed session, restart kept the same ids`.
+That project was removed. On the already-running Compose database, SHA-256 of
+`det-f26eee89fc522826ab5d90f1` still matches both stored hashes (qualifying
+14291 bytes, closing 8281 bytes). `proof_status` was `certified`.
+

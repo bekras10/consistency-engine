@@ -21,13 +21,21 @@ qualifying observation:
   the original hash and JSON stay where they are.
 
 Each affected detection is repaired inside its own savepoint. A failure rolls
-that savepoint back, marks the row ``uncertified`` without changing its hash
-or certificate JSON, and the audit continues. Detections already certified in
-earlier savepoints stay certified. Rows whose stored pairs already match are
-not rewritten. Re-running the audit is safe: consistent rows are skipped, and
-a row that still cannot be linked stays uncertified. If the migration process
-is killed before Alembic commits, PostgreSQL rolls the revision back and the
-next upgrade retries.
+that savepoint back and marks the row ``uncertified`` without changing its hash
+or certificate JSON. That quarantine is its own savepoint. If the quarantine
+write also fails, the audit raises and the upgrade aborts; the row is not left
+``certified`` by a migration that reported success. When quarantine succeeds,
+detections already certified in earlier savepoints stay certified. Rows whose
+stored pairs already match are not rewritten. Re-running the audit is safe:
+consistent rows are skipped, and a row that still cannot be linked stays
+uncertified. If the migration process is killed before Alembic commits,
+PostgreSQL rolls the revision back and the next upgrade retries.
+
+A document displaced out of ``certificate_json`` is stored as the closing proof
+only when those bytes hash to the closing hash and parse as a closing
+certificate. Malformed displaced bytes are kept on the detection record for
+investigation and are not given a closing hash. The qualifying repair can
+still be ``certified`` when that link holds.
 
 Checkpoints are read for one affected session at a time, in pages. Sessions
 with no mismatched proof are not read.
@@ -554,9 +562,24 @@ def _projection(connection: Connection, detection_id: str, certificate_json: str
     )
 
 
-def _record_json(raw: Any, **fields: str | None) -> str:
+def _accepted_closing(document: str) -> tuple[str, str, str] | None:
+    """Return the document, its hash, and its classification when it is a proof.
+
+    The hash is SHA-256 of these exact bytes. A document that does not parse
+    as a closing certificate is not given a hash.
+    """
+    try:
+        cert = ProofCertificate.model_validate_json(document)
+    except ValueError:
+        return None
+    return document, _sha256(document), cert.classification.value
+
+
+def _record_json(raw: Any, *, drop: tuple[str, ...] = (), **fields: str | None) -> str:
     parsed = _as_object(raw)
     body = {} if parsed is None else dict(parsed)
+    for key in drop:
+        body.pop(key, None)
     for key, value in fields.items():
         if value is not None:
             body[key] = value
@@ -600,8 +623,9 @@ def audit_stored_proofs(connection: Connection) -> None:
     """Check mismatched proofs. Leave matching pairs untouched.
 
     Only sessions that contain a mismatched or missing proof are read.
-    Checkpoints for one of those sessions are paged. A failure on one detection
-    does not roll back repairs already committed in earlier savepoints.
+    Checkpoints for one of those sessions are paged. A repair failure
+    quarantines that detection and leaves earlier savepoints certified. If that
+    quarantine write fails, this function raises so the upgrade aborts.
     """
     grouped: dict[str, list[Any]] = defaultdict(list)
     for row in _affected(connection):
@@ -627,8 +651,11 @@ def _repair_isolated(connection: Connection, row: Any, replayed: dict[str, str])
         try:
             _quarantine(connection, detection_id)
             rescue.commit()
-        except Exception:
+        except Exception as quarantine_error:
             rescue.rollback()
+            raise RuntimeError(
+                f"{detection_id} certificate quarantine write failed"
+            ) from quarantine_error
 
 
 def _repair_row(connection: Connection, row: Any, replayed: dict[str, str]) -> None:
@@ -658,6 +685,7 @@ def _repair_row(connection: Connection, row: Any, replayed: dict[str, str]) -> N
     new_closing_hash = stored_closing_hash
     new_closing_class = row["closing_classification"]
     displaced: str | None = None
+    withheld_displaced: str | None = None
     if not qualifying_ok:
         if stored_qualifying_hash is None:
             _quarantine(connection, detection_id)
@@ -691,11 +719,12 @@ def _repair_row(connection: Connection, row: Any, replayed: dict[str, str]) -> N
         new_qualifying = found
         new_qualifying_hash = stored_qualifying_hash
     if closing_document is None and stored_closing_hash is None and displaced is not None:
-        new_closing = displaced
-        new_closing_hash = _sha256(displaced)
-        parsed = _classification(displaced)
-        if parsed is not None:
-            new_closing_class = parsed
+        accepted = _accepted_closing(displaced)
+        if accepted is None:
+            # Keep the bytes for investigation. Do not advertise them as a proof.
+            withheld_displaced = displaced
+        else:
+            new_closing, new_closing_hash, new_closing_class = accepted
     elif not closing_ok:
         if stored_closing_hash is None:
             _quarantine(connection, detection_id)
@@ -731,9 +760,14 @@ def _repair_row(connection: Connection, row: Any, replayed: dict[str, str]) -> N
     if new_qualifying is None or new_qualifying_hash != _sha256(new_qualifying):
         _quarantine(connection, detection_id)
         return
-    if new_closing_hash is not None and (
-        new_closing is None or new_closing_hash != _sha256(new_closing)
-    ):
+    if new_closing is not None:
+        checked = _accepted_closing(new_closing)
+        if checked is None or checked[1] != new_closing_hash:
+            withheld_displaced = new_closing if withheld_displaced is None else withheld_displaced
+            new_closing = None
+            new_closing_hash = None
+            new_closing_class = None
+    elif new_closing_hash is not None:
         _quarantine(connection, detection_id)
         return
     connection.execute(
@@ -760,10 +794,16 @@ def _repair_row(connection: Connection, row: Any, replayed: dict[str, str]) -> N
             "status": _CERTIFIED,
             "record_json": _record_json(
                 row["record_json"],
+                drop=(
+                    ("closing_certificate_json", "closing_certificate_hash")
+                    if withheld_displaced is not None
+                    else ()
+                ),
                 certificate_json=new_qualifying,
                 certificate_hash=new_qualifying_hash,
                 closing_certificate_json=new_closing,
                 closing_certificate_hash=new_closing_hash,
+                displaced_document=withheld_displaced,
             ),
         },
     )

@@ -131,15 +131,18 @@ From the repository root, matching the Makefile and [deployment.md](deployment.m
 
 ```bash
 make setup
-docker compose -p consistency-engine -f compose.host-db.yml up -d db
+POSTGRES_PORT=5433 docker compose -p consistency-engine -f compose.host-db.yml up -d db
 export DATABASE_URL=postgresql+asyncpg://consistency:consistency@127.0.0.1:5433/consistency
 make lint
 make typecheck
 make test
 ```
 
-Host tests expect Postgres on `127.0.0.1:5433`. Do not point them at a
-PostgreSQL instance on port 5432.
+`compose.host-db.yml` publishes `127.0.0.1:${POSTGRES_PORT:-5432}`. Host tests
+on this machine use port 5433, the same port as the `DATABASE_URL` above and
+as [deployment.md](deployment.md). The compose default stays 5432 for a machine
+where that port is free. Do not point the URL at a PostgreSQL instance on
+port 5432.
 
 The local Compose stack, bound to loopback, is:
 
